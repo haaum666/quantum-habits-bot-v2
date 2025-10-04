@@ -25,7 +25,6 @@ async function sendTelegramMessage(chatId, text) {
         }),
     });
     if (!response.ok) {
-        // Мы не бросаем ошибку здесь, чтобы не прерывать основной процесс, но логируем ее
         console.error(`Telegram API Error: ${await response.text()}`);
     }
     return response.json();
@@ -33,16 +32,28 @@ async function sendTelegramMessage(chatId, text) {
 
 // 3. ОСНОВНОЙ ОБРАБОТЧИК (Webhook)
 export default async (request, response) => {
-    // ВАЖНО: Мы удаляем внешний try...catch, который вызывал ошибку "Body already read"
-    // и оставляем только внутренний обработчик логики.
-
+    
     if (request.method !== 'POST') {
         return response.status(405).send('Only POST requests allowed');
     }
 
-    // Если body уже прочитан (из-за предыдущего сбоя), этот код может быть уязвим.
-    // Однако, в чистом Vercel environment он должен работать.
-    const body = request.body; 
+    let body;
+    try {
+        // *** ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ: Гарантированное чтение тела запроса ***
+        // Мы явно читаем тело как текст, а затем парсим его в JSON.
+        const rawBody = await new Promise((resolve) => {
+            let data = '';
+            request.on('data', chunk => data += chunk);
+            request.on('end', () => resolve(data));
+        });
+        body = JSON.parse(rawBody);
+
+    } catch (e) {
+        // Если тело не может быть прочитано или распарсено, отвечаем 400.
+        console.error('Body parsing failed:', e);
+        return response.status(400).send('Invalid request body');
+    }
+
     const message = body.message;
 
     if (!message || !message.text || !message.chat) {
@@ -81,7 +92,6 @@ export default async (request, response) => {
                     .insert([{ telegram_id: chatId, onboarding_state: 'STEP_1' }]);
                 
                 if (insertError) {
-                    // Теперь эта ошибка не должна сработать, т.к. RLS исправлен
                     console.error('Insert Error:', insertError);
                     await sendTelegramMessage(chatId, `Ошибка БД (INSERT): ${insertError.message}`);
                     return response.status(500).send('Database Insert Error');
@@ -98,12 +108,10 @@ export default async (request, response) => {
         // ЛОГИКА 2: ОБРАБОТКА ТЕКСТА (Ответ на вопрос)
         // ===============================================
         } else {
-
-            // Обработка ответа на ШАГ 1: Идентичность
+            // ... (логика обработки ответа)
             if (userData.onboarding_state === 'STEP_1') {
                 const identityText = incomingText.substring(0, 100);
 
-                // Обновляем запись пользователя
                 const { error: updateError } = await supabase
                     .from('users')
                     .update({
@@ -118,14 +126,11 @@ export default async (request, response) => {
                     return response.status(500).send('Database Update Error');
                 }
 
-                // Отправляем подтверждение и следующий вопрос
                 const confirmationMessage = `Отлично! Вы выбрали Идентичность: *${identityText}*.\n\nКаждый раз, когда вы выполняете привычку, вы голосуете за эту личность.`;
                 await sendTelegramMessage(chatId, confirmationMessage);
 
-                // Следующий вопрос: Выбор первой привычки (ШАГ 2 из 10)
                 await sendTelegramMessage(chatId, "*ШАГ 2 из 10: Что ты будешь делать?*\n\nВспомните Правило Двух Минут: Любая привычка должна занимать не более 2 минут.\n\nНапиши, какую микро-привычку ты готов выполнять ежедневно (например: \"Отжаться 1 раз\", \"Прочитать 1 страницу\", \"Выпить 1 стакан воды\").");
             
-            // Заглушка для всех других состояний
             } else {
                 await sendTelegramMessage(chatId, `С возвращением! Твой текущий статус онбординга: *${userData.onboarding_state}*.\n\n_Пока что я могу обрабатывать только ответы на STEP_1._`);
             }
@@ -135,9 +140,8 @@ export default async (request, response) => {
         response.status(200).send('Processed');
 
     } catch (e) {
-        // Логирование ЛЮБОЙ ошибки, которая могла проскочить
+        // Логирование ЛЮБОЙ ошибки
         console.error('Webhook processing failed (uncaught):', e);
-        // Не пытаемся отправить сообщение в ТГ, чтобы избежать повторной ошибки "Body already read"
         response.status(500).send('Server Error');
     }
 };
