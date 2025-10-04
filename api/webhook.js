@@ -4,29 +4,28 @@ import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
-// ИСПОЛЬЗУЕМ НОВУЮ СЛУЖЕБНУЮ ПЕРЕМЕННУЮ ДЛЯ ОБХОДА RLS
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 // Инициализация клиента Supabase с Service Key
-// Service Key имеет права администратора и обходит RLS
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY); 
 
 // Базовый URL для отправки ответов в Telegram API
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // 2. ФУНКЦИЯ ДЛЯ ОТВЕТА В TELEGRAM
-async function sendTelegramMessage(chatId, text) {
+async function sendTelegramMessage(chatId, text, parse_mode = 'Markdown') {
     const response = await fetch(`${TELEGRAM_API}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             chat_id: chatId,
             text: text,
-            parse_mode: 'Markdown',
+            parse_mode: parse_mode, // Используем Markdown по умолчанию
         }),
     });
     if (!response.ok) {
+        // Логируем ошибку, но не выбрасываем ее, чтобы избежать Body has already been read
         console.error(`Telegram API Error: ${await response.text()}`);
     }
     return response.json();
@@ -73,9 +72,9 @@ export default async (request, response) => {
 
         // Обработка ошибки БД, если она не 'No rows returned' (PGRST116)
         if (userError && userError.code !== 'PGRST116') {
-            console.error('Supabase Error:', userError);
-            // Если ключ сработал, эта ошибка не должна возникнуть
-            await sendTelegramMessage(chatId, `Ошибка БД (SELECT): ${userError.message}`);
+            console.error('Supabase Error (SELECT):', userError);
+            // Отправляем чистую ошибку без Markdown, чтобы не падать
+            await sendTelegramMessage(chatId, `Критическая ошибка БД. Код: ${userError.code}.`, 'HTML');
             return response.status(500).send('Database Error');
         }
         
@@ -86,19 +85,26 @@ export default async (request, response) => {
         
         if (isStartCommand || !userData) {
             
-            // 1. Вставка нового пользователя
+            // 1. Вставка нового пользователя (только если не существует)
             if (!userData) {
                 const { error: insertError } = await supabase
                     .from('users')
                     .insert([{ telegram_id: chatId, onboarding_state: 'STEP_1' }]);
                 
                 if (insertError) {
-                    console.error('Insert Error:', insertError);
-                    await sendTelegramMessage(chatId, `Ошибка БД (INSERT): ${insertError.message}`);
-                    return response.status(500).send('Database Insert Error');
+                    // Обрабатываем ошибку дубликата ключа (23505) как ожидаемое событие
+                    if (insertError.code === '23505') {
+                        // Пользователь уже существует, продолжаем работу.
+                        console.log('Пользователь уже существует, продолжаем работу.');
+                    } else {
+                        console.error('Insert Error:', insertError);
+                         // Отправляем чистую ошибку без Markdown
+                        await sendTelegramMessage(chatId, `Ошибка БД (INSERT). Код: ${insertError.code}.`, 'HTML');
+                        return response.status(500).send('Database Insert Error');
+                    }
                 }
             }
-
+            
             // 2. Отправка первого вопроса
             const welcomeMessage = `👋 *Привет!* Я твой личный бот-помощник по методу \"Атомных Привычек\".\n\nЯ помогу тебе строить системы, которые приведут к 1% улучшению каждый день. \n\nДавай начнем с главного.`;
             await sendTelegramMessage(chatId, welcomeMessage);
@@ -123,7 +129,8 @@ export default async (request, response) => {
 
                 if (updateError) {
                     console.error('Update Identity Error:', updateError);
-                    await sendTelegramMessage(chatId, `Ошибка БД (UPDATE): ${updateError.message}`);
+                     // Отправляем чистую ошибку без Markdown
+                    await sendTelegramMessage(chatId, `Ошибка БД (UPDATE). Код: ${updateError.code}.`, 'HTML');
                     return response.status(500).send('Database Update Error');
                 }
 
@@ -142,6 +149,7 @@ export default async (request, response) => {
 
     } catch (e) {
         console.error('Webhook processing failed (uncaught):', e);
+        // Не пытаемся отправить сообщение в ТГ, чтобы избежать повторной ошибки "Body already read"
         response.status(500).send('Server Error');
     }
 };
