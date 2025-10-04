@@ -1,15 +1,20 @@
-// ... (оставьте импорты и конфигурацию Supabase/Telegram API в начале файла без изменений)
+// api/webhook.js
+
 import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
+// Получаем ключи из Vercel Environment Variables
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
+// Инициализация клиента Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Базовый URL для отправки ответов в Telegram API
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
-// 2. ФУНКЦИЯ ДЛЯ ОТВЕТА В TELEGRAM (без изменений)
+// 2. ФУНКЦИЯ ДЛЯ ОТВЕТА В TELEGRAM
 async function sendTelegramMessage(chatId, text) {
     const response = await fetch(`${TELEGRAM_API}/sendMessage`, {
         method: 'POST',
@@ -23,7 +28,7 @@ async function sendTelegramMessage(chatId, text) {
     return response.json();
 }
 
-// 3. ОСНОВНОЙ ОБРАБОТЧИК (Webhook) - НОВЫЙ БЛОК ЛОГИКИ
+// 3. ОСНОВНОЙ ОБРАБОТЧИК (Webhook)
 export default async (request, response) => {
     try {
         if (request.method !== 'POST') {
@@ -40,7 +45,7 @@ export default async (request, response) => {
         const chatId = message.chat.id;
         const incomingText = message.text.trim();
 
-        // A. Проверка существования пользователя в базе (общий блок для всех)
+        // A. Проверка существования пользователя в базе
         const { data: userData, error: userError } = await supabase
             .from('users')
             .select('telegram_id, onboarding_state')
@@ -56,7 +61,9 @@ export default async (request, response) => {
         // ===============================================
         // ЛОГИКА 1: КОМАНДА /start (Или Новый Пользователь)
         // ===============================================
-        if (incomingText.startsWith('/start') || !userData) {
+        const isStartCommand = incomingText.startsWith('/start');
+        
+        if (isStartCommand || !userData) {
             
             // 1. Вставка нового пользователя
             if (!userData) {
@@ -83,7 +90,7 @@ export default async (request, response) => {
 
             // Обработка ответа на ШАГ 1: Идентичность
             if (userData.onboarding_state === 'STEP_1') {
-                const identityText = incomingText.substring(0, 100); 
+                const identityText = incomingText.substring(0, 100); // Обрезаем, чтобы не перегружать базу
 
                 // Обновляем запись пользователя
                 const { error: updateError } = await supabase
