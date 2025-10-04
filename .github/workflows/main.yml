@@ -3,6 +3,7 @@
 name: CI/CD Pipeline
 
 on:
+  # Запускать пайплайн при пуше и пулл-реквесте в главную ветку
   push:
     branches:
       - main
@@ -22,7 +23,30 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20' # Используем LTS-версию Node.js
-    
 
       - name: Install Dependencies
         run: npm install
+
+      # ==================================
+      # Шаг 1: Тестирование и Сборка (Build Test)
+      # ==================================
+      - name: Linting and Build Test
+        run: |
+          # В MVP просто подтверждаем, что зависимости установлены.
+          # В будущем здесь будут запускаться линтеры и unit-тесты.
+          echo "Dependencies installed. Proceeding to deploy."
+
+      # ==================================
+      # Шаг 2: Деплой на Vercel (КРИТИЧНО)
+      # Использует VERCEL_TOKEN для принудительного деплоя.
+      # ==================================
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        if: success()
+        with:
+          # Секреты, которые вы добавили в GitHub:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }} 
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }} 
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          # Нужен для работы с GitHub API:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
