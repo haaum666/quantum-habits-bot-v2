@@ -165,9 +165,35 @@ export default async (request, response) => {
                 // Следующий вопрос: Местоположение (ШАГ 3 из 10)
                 await sendTelegramMessage(chatId, "*ШАГ 3 из 10: Где ты это сделаешь?*\n\nМы привязываем новую привычку к существующему действию. Это \"Связывание привычек\".\n\nНапиши, после какого ежедневного действия ты выполнишь эту привычку (например: \"После того, как заварю утренний кофе\", \"После того, как почищу зубы\", \"После того, как сяду за рабочий стол\").");
             
+            // НОВЫЙ БЛОК: Обработка ответа на ШАГ 3: Связывание привычек (STEP_3)
+            } else if (userData.onboarding_state === 'STEP_3') {
+                const linkActionText = incomingText.substring(0, 100);
+
+                // Обновляем запись пользователя
+                const { error: updateError } = await supabase
+                    .from('users')
+                    .update({
+                        habit_link_action: linkActionText,
+                        onboarding_state: 'STEP_4'
+                    })
+                    .eq('telegram_id', chatId);
+
+                if (updateError) {
+                    console.error('Update Link Action Error:', updateError);
+                    await sendTelegramMessage(chatId, `Ошибка БД (UPDATE). Код: ${updateError.code}.`, 'HTML');
+                    return response.status(500).send('Database Update Error');
+                }
+
+                // Отправляем подтверждение и следующий вопрос
+                const confirmationMessage = `Запомнено. Вы будете выполнять привычку *ПОСЛЕ* того, как: *${linkActionText}*.\n\n*Правило 4: Сделайте ее Удовлетворительной.*`;
+                await sendTelegramMessage(chatId, confirmationMessage);
+
+                // Следующий вопрос: Награда (ШАГ 4 из 10)
+                await sendTelegramMessage(chatId, "*ШАГ 4 из 10: Чем ты себя наградишь?*\n\nДля завершения цикла привычки (Подсказка -> Действие -> Награда) нужно вознаграждение.\n\nНапиши, чем ты себя немедленно наградишь после выполнения микро-привычки (например: \"Выпью чашку чая с лимоном\", \"Сделаю 5 минут растяжки\", \"Просмотрю 1 минуту новостной ленты\").");
+            
             // Заглушка для всех других состояний
             } else {
-                await sendTelegramMessage(chatId, `С возвращением! Твой текущий статус онбординга: *${userData.onboarding_state}*.\n\n_Пока что я могу обрабатывать только ответы на STEP_1 и STEP_2._`);
+                await sendTelegramMessage(chatId, `С возвращением! Твой текущий статус онбординга: *${userData.onboarding_state}*.\n\n_Пока что я могу обрабатывать только ответы на STEP_1, STEP_2 и STEP_3._`);
             }
         }
         
