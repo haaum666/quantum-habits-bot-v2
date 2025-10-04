@@ -3,7 +3,6 @@
 import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
-// Читаем ключи с префиксом BOT_, чтобы не конфликтовать с другими проектами
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.BOT_SUPABASE_ANON_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -25,11 +24,8 @@ async function sendTelegramMessage(chatId, text) {
             parse_mode: 'Markdown',
         }),
     });
-    // Обработка возможной ошибки Telegram API
     if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Telegram API Error: ${errorText}`);
-        // Мы не бросаем ошибку, чтобы не прерывать основной процесс, но логируем ее
+        console.error(`Telegram API Error: ${await response.text()}`);
     }
     return response.json();
 }
@@ -53,9 +49,9 @@ export default async (request, response) => {
         const incomingText = message.text.trim();
 
         // A. Проверка существования пользователя в базе
-        // ИСПОЛЬЗУЕМ 'public.users' для обхода ошибки кэша/конфигурации
+        // ИСПОЛЬЗУЕМ ТОЛЬКО 'users'
         const { data: userData, error: userError } = await supabase
-            .from('public.users')
+            .from('users') 
             .select('telegram_id, onboarding_state')
             .eq('telegram_id', chatId)
             .single();
@@ -76,9 +72,9 @@ export default async (request, response) => {
             
             // 1. Вставка нового пользователя
             if (!userData) {
-                // ИСПОЛЬЗУЕМ 'public.users' для обхода ошибки кэша/конфигурации
+                // ИСПОЛЬЗУЕМ ТОЛЬКО 'users'
                 const { error: insertError } = await supabase
-                    .from('public.users')
+                    .from('users')
                     .insert([{ telegram_id: chatId, onboarding_state: 'STEP_1' }]);
                 
                 if (insertError) {
@@ -101,12 +97,12 @@ export default async (request, response) => {
 
             // Обработка ответа на ШАГ 1: Идентичность
             if (userData.onboarding_state === 'STEP_1') {
-                const identityText = incomingText.substring(0, 100); // Обрезаем
+                const identityText = incomingText.substring(0, 100);
 
                 // Обновляем запись пользователя
                 const { error: updateError } = await supabase
-                    // ИСПОЛЬЗУЕМ 'public.users' для обхода ошибки кэша/конфигурации
-                    .from('public.users')
+                    // ИСПОЛЬЗУЕМ ТОЛЬКО 'users'
+                    .from('users')
                     .update({
                         desired_identity: identityText,
                         onboarding_state: 'STEP_2'
@@ -119,13 +115,12 @@ export default async (request, response) => {
                     return response.status(500).send('Database Update Error');
                 }
 
-                // Отправляем подтверждение и следующий вопрос (Шаг 0.3)
+                // Отправляем подтверждение и следующий вопрос
                 const confirmationMessage = `Отлично! Вы выбрали Идентичность: *${identityText}*.\n\nКаждый раз, когда вы выполняете привычку, вы голосуете за эту личность.`;
                 await sendTelegramMessage(chatId, confirmationMessage);
 
                 // Следующий вопрос: Выбор первой привычки (ШАГ 2 из 10)
                 await sendTelegramMessage(chatId, "*ШАГ 2 из 10: Что ты будешь делать?*\n\nВспомните Правило Двух Минут: Любая привычка должна занимать не более 2 минут.\n\nНапиши, какую микро-привычку ты готов выполнять ежедневно (например: \"Отжаться 1 раз\", \"Прочитать 1 страницу\", \"Выпить 1 стакан воды\").");
-
             
             // Заглушка для всех других состояний
             } else {
@@ -139,8 +134,7 @@ export default async (request, response) => {
     } catch (e) {
         console.error('Webhook processing failed:', e);
         if (chatId) {
-             // Отправляем КРИТИЧЕСКУЮ ошибку в ТГ
-            await sendTelegramMessage(chatId, `КРИТИЧЕСКАЯ ОШИБКА: ${e.message}.`); 
+            await sendTelegramMessage(chatId, `КРИТИЧЕСКАЯ ОШИБКА: ${e.message}.`);
         }
         response.status(500).send('Server Error');
     }
