@@ -4,11 +4,13 @@ import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.BOT_SUPABASE_ANON_KEY;
+// ИСПОЛЬЗУЕМ НОВУЮ СЛУЖЕБНУЮ ПЕРЕМЕННУЮ ДЛЯ ОБХОДА RLS
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-// Инициализация клиента Supabase
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Инициализация клиента Supabase с Service Key
+// Service Key имеет права администратора и обходит RLS
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY); 
 
 // Базовый URL для отправки ответов в Telegram API
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -39,8 +41,7 @@ export default async (request, response) => {
 
     let body;
     try {
-        // *** ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ: Гарантированное чтение тела запроса ***
-        // Мы явно читаем тело как текст, а затем парсим его в JSON.
+        // Гарантированное чтение тела запроса
         const rawBody = await new Promise((resolve) => {
             let data = '';
             request.on('data', chunk => data += chunk);
@@ -49,7 +50,6 @@ export default async (request, response) => {
         body = JSON.parse(rawBody);
 
     } catch (e) {
-        // Если тело не может быть прочитано или распарсено, отвечаем 400.
         console.error('Body parsing failed:', e);
         return response.status(400).send('Invalid request body');
     }
@@ -74,6 +74,7 @@ export default async (request, response) => {
         // Обработка ошибки БД, если она не 'No rows returned' (PGRST116)
         if (userError && userError.code !== 'PGRST116') {
             console.error('Supabase Error:', userError);
+            // Если ключ сработал, эта ошибка не должна возникнуть
             await sendTelegramMessage(chatId, `Ошибка БД (SELECT): ${userError.message}`);
             return response.status(500).send('Database Error');
         }
@@ -140,7 +141,6 @@ export default async (request, response) => {
         response.status(200).send('Processed');
 
     } catch (e) {
-        // Логирование ЛЮБОЙ ошибки
         console.error('Webhook processing failed (uncaught):', e);
         response.status(500).send('Server Error');
     }
