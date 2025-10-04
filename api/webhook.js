@@ -3,10 +3,10 @@
 import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
-// Теперь читаем ключи с префиксом BOT_
+// Читаем ключи с префиксом BOT_, чтобы не конфликтовать с другими проектами
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.BOT_SUPABASE_ANON_KEY; 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // Токен Telegram оставляем без префикса, так как он уникален
+const SUPABASE_ANON_KEY = process.env.BOT_SUPABASE_ANON_KEY;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 // Инициализация клиента Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -25,12 +25,18 @@ async function sendTelegramMessage(chatId, text) {
             parse_mode: 'Markdown',
         }),
     });
+    // Обработка возможной ошибки Telegram API
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Telegram API Error: ${errorText}`);
+        // Мы не бросаем ошибку, чтобы не прерывать основной процесс, но логируем ее
+    }
     return response.json();
 }
 
 // 3. ОСНОВНОЙ ОБРАБОТЧИК (Webhook)
 export default async (request, response) => {
-    let chatId; 
+    let chatId;
     try {
         if (request.method !== 'POST') {
             return response.status(405).send('Only POST requests allowed');
@@ -46,9 +52,10 @@ export default async (request, response) => {
         chatId = message.chat.id;
         const incomingText = message.text.trim();
 
-        // Проверка существования пользователя в базе
+        // A. Проверка существования пользователя в базе
+        // ИСПОЛЬЗУЕМ 'public.users' для обхода ошибки кэша/конфигурации
         const { data: userData, error: userError } = await supabase
-            .from('users')
+            .from('public.users')
             .select('telegram_id, onboarding_state')
             .eq('telegram_id', chatId)
             .single();
@@ -56,21 +63,22 @@ export default async (request, response) => {
         // Обработка ошибки базы данных, если она не 'No rows returned'
         if (userError && userError.code !== 'PGRST116') {
             console.error('Supabase Error:', userError);
-            await sendTelegramMessage(chatId, `Ошибка базы данных: ${userError.message}`); 
+            await sendTelegramMessage(chatId, `Ошибка базы данных: ${userError.message}`);
             return response.status(500).send('Database Error');
         }
         
-        // ... (Остальная логика онбординга остается прежней) ...
-        // (Логика онбординга удалена здесь для краткости, она полная в вашем файле)
-
+        // ===============================================
+        // ЛОГИКА 1: КОМАНДА /start (Или Новый Пользователь)
+        // ===============================================
         const isStartCommand = incomingText.startsWith('/start');
         
         if (isStartCommand || !userData) {
             
             // 1. Вставка нового пользователя
             if (!userData) {
+                // ИСПОЛЬЗУЕМ 'public.users' для обхода ошибки кэша/конфигурации
                 const { error: insertError } = await supabase
-                    .from('users')
+                    .from('public.users')
                     .insert([{ telegram_id: chatId, onboarding_state: 'STEP_1' }]);
                 
                 if (insertError) {
@@ -86,15 +94,19 @@ export default async (request, response) => {
             
             await sendTelegramMessage(chatId, "*ШАГ 1 из 10: КЕМ ты хочешь стать?*\n\nВся сила в Идентичности. Напиши, кем ты хочешь стать благодаря своим привычкам (например: \"Здоровым и энергичным\", \"Продуктивным и организованным\", \"Образованным и развитым\").");
 
+        // ===============================================
+        // ЛОГИКА 2: ОБРАБОТКА ТЕКСТА (Ответ на вопрос)
+        // ===============================================
         } else {
 
             // Обработка ответа на ШАГ 1: Идентичность
             if (userData.onboarding_state === 'STEP_1') {
-                const identityText = incomingText.substring(0, 100); 
+                const identityText = incomingText.substring(0, 100); // Обрезаем
 
                 // Обновляем запись пользователя
                 const { error: updateError } = await supabase
-                    .from('users')
+                    // ИСПОЛЬЗУЕМ 'public.users' для обхода ошибки кэша/конфигурации
+                    .from('public.users')
                     .update({
                         desired_identity: identityText,
                         onboarding_state: 'STEP_2'
@@ -107,7 +119,7 @@ export default async (request, response) => {
                     return response.status(500).send('Database Update Error');
                 }
 
-                // Отправляем подтверждение и следующий вопрос
+                // Отправляем подтверждение и следующий вопрос (Шаг 0.3)
                 const confirmationMessage = `Отлично! Вы выбрали Идентичность: *${identityText}*.\n\nКаждый раз, когда вы выполняете привычку, вы голосуете за эту личность.`;
                 await sendTelegramMessage(chatId, confirmationMessage);
 
@@ -127,6 +139,7 @@ export default async (request, response) => {
     } catch (e) {
         console.error('Webhook processing failed:', e);
         if (chatId) {
+             // Отправляем КРИТИЧЕСКУЮ ошибку в ТГ
             await sendTelegramMessage(chatId, `КРИТИЧЕСКАЯ ОШИБКА: ${e.message}.`); 
         }
         response.status(500).send('Server Error');
