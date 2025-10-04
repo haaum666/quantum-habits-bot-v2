@@ -3,11 +3,10 @@
 import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
-// Получаем ключи из Vercel Environment Variables
-const SUPABASE_URL = process.env.SUPABASE_URL;
-// Используем SERVICE_ROLE_KEY, который вы сохранили в SUPABASE_ANON_KEY, для обхода RLS
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY; 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+// Теперь читаем ключи с префиксом BOT_
+const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.BOT_SUPABASE_ANON_KEY; 
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // Токен Telegram оставляем без префикса, так как он уникален
 
 // Инициализация клиента Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -47,8 +46,7 @@ export default async (request, response) => {
         chatId = message.chat.id;
         const incomingText = message.text.trim();
 
-        // A. Проверка существования пользователя в базе
-        // SERVICE_ROLE_KEY здесь обходит RLS и выполняет запрос
+        // Проверка существования пользователя в базе
         const { data: userData, error: userError } = await supabase
             .from('users')
             .select('telegram_id, onboarding_state')
@@ -62,9 +60,9 @@ export default async (request, response) => {
             return response.status(500).send('Database Error');
         }
         
-        // ===============================================
-        // ЛОГИКА 1: КОМАНДА /start (Или Новый Пользователь)
-        // ===============================================
+        // ... (Остальная логика онбординга остается прежней) ...
+        // (Логика онбординга удалена здесь для краткости, она полная в вашем файле)
+
         const isStartCommand = incomingText.startsWith('/start');
         
         if (isStartCommand || !userData) {
@@ -88,14 +86,11 @@ export default async (request, response) => {
             
             await sendTelegramMessage(chatId, "*ШАГ 1 из 10: КЕМ ты хочешь стать?*\n\nВся сила в Идентичности. Напиши, кем ты хочешь стать благодаря своим привычкам (например: \"Здоровым и энергичным\", \"Продуктивным и организованным\", \"Образованным и развитым\").");
 
-        // ===============================================
-        // ЛОГИКА 2: ОБРАБОТКА ТЕКСТА (Ответ на вопрос)
-        // ===============================================
         } else {
 
             // Обработка ответа на ШАГ 1: Идентичность
             if (userData.onboarding_state === 'STEP_1') {
-                const identityText = incomingText.substring(0, 100); // Обрезаем
+                const identityText = incomingText.substring(0, 100); 
 
                 // Обновляем запись пользователя
                 const { error: updateError } = await supabase
@@ -112,7 +107,7 @@ export default async (request, response) => {
                     return response.status(500).send('Database Update Error');
                 }
 
-                // Отправляем подтверждение и следующий вопрос (Шаг 0.3)
+                // Отправляем подтверждение и следующий вопрос
                 const confirmationMessage = `Отлично! Вы выбрали Идентичность: *${identityText}*.\n\nКаждый раз, когда вы выполняете привычку, вы голосуете за эту личность.`;
                 await sendTelegramMessage(chatId, confirmationMessage);
 
@@ -132,7 +127,6 @@ export default async (request, response) => {
     } catch (e) {
         console.error('Webhook processing failed:', e);
         if (chatId) {
-             // Отправляем КРИТИЧЕСКУЮ ошибку в ТГ
             await sendTelegramMessage(chatId, `КРИТИЧЕСКАЯ ОШИБКА: ${e.message}.`); 
         }
         response.status(500).send('Server Error');
