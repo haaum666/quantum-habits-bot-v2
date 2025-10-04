@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
+// Используем Service Role Key для обхода RLS и максимальной надежности
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -21,11 +22,11 @@ async function sendTelegramMessage(chatId, text, parse_mode = 'Markdown') {
         body: JSON.stringify({
             chat_id: chatId,
             text: text,
-            parse_mode: parse_mode, // Используем Markdown по умолчанию
+            parse_mode: parse_mode, 
         }),
     });
     if (!response.ok) {
-        // Логируем ошибку, но не выбрасываем ее, чтобы избежать Body has already been read
+        // Логируем ошибку, но не выбрасываем ее
         console.error(`Telegram API Error: ${await response.text()}`);
     }
     return response.json();
@@ -73,7 +74,6 @@ export default async (request, response) => {
         // Обработка ошибки БД, если она не 'No rows returned' (PGRST116)
         if (userError && userError.code !== 'PGRST116') {
             console.error('Supabase Error (SELECT):', userError);
-            // Отправляем чистую ошибку без Markdown, чтобы не падать
             await sendTelegramMessage(chatId, `Критическая ошибка БД. Код: ${userError.code}.`, 'HTML');
             return response.status(500).send('Database Error');
         }
@@ -92,13 +92,10 @@ export default async (request, response) => {
                     .insert([{ telegram_id: chatId, onboarding_state: 'STEP_1' }]);
                 
                 if (insertError) {
-                    // Обрабатываем ошибку дубликата ключа (23505) как ожидаемое событие
                     if (insertError.code === '23505') {
-                        // Пользователь уже существует, продолжаем работу.
                         console.log('Пользователь уже существует, продолжаем работу.');
                     } else {
                         console.error('Insert Error:', insertError);
-                         // Отправляем чистую ошибку без Markdown
                         await sendTelegramMessage(chatId, `Ошибка БД (INSERT). Код: ${insertError.code}.`, 'HTML');
                         return response.status(500).send('Database Insert Error');
                     }
@@ -115,10 +112,12 @@ export default async (request, response) => {
         // ЛОГИКА 2: ОБРАБОТКА ТЕКСТА (Ответ на вопрос)
         // ===============================================
         } else {
-            // ... (логика обработки ответа)
+
+            // Обработка ответа на ШАГ 1: Идентичность (STEP_1)
             if (userData.onboarding_state === 'STEP_1') {
                 const identityText = incomingText.substring(0, 100);
 
+                // Обновляем запись пользователя
                 const { error: updateError } = await supabase
                     .from('users')
                     .update({
@@ -129,18 +128,46 @@ export default async (request, response) => {
 
                 if (updateError) {
                     console.error('Update Identity Error:', updateError);
-                     // Отправляем чистую ошибку без Markdown
                     await sendTelegramMessage(chatId, `Ошибка БД (UPDATE). Код: ${updateError.code}.`, 'HTML');
                     return response.status(500).send('Database Update Error');
                 }
 
+                // Отправляем подтверждение и следующий вопрос
                 const confirmationMessage = `Отлично! Вы выбрали Идентичность: *${identityText}*.\n\nКаждый раз, когда вы выполняете привычку, вы голосуете за эту личность.`;
                 await sendTelegramMessage(chatId, confirmationMessage);
 
+                // Следующий вопрос: Выбор первой привычки (ШАГ 2 из 10)
                 await sendTelegramMessage(chatId, "*ШАГ 2 из 10: Что ты будешь делать?*\n\nВспомните Правило Двух Минут: Любая привычка должна занимать не более 2 минут.\n\nНапиши, какую микро-привычку ты готов выполнять ежедневно (например: \"Отжаться 1 раз\", \"Прочитать 1 страницу\", \"Выпить 1 стакан воды\").");
             
+            // Обработка ответа на ШАГ 2: Микро-Привычка (STEP_2)
+            } else if (userData.onboarding_state === 'STEP_2') {
+                const microStepText = incomingText.substring(0, 100);
+
+                // Обновляем запись пользователя
+                const { error: updateError } = await supabase
+                    .from('users')
+                    .update({
+                        habit_micro_step: microStepText,
+                        onboarding_state: 'STEP_3'
+                    })
+                    .eq('telegram_id', chatId);
+
+                if (updateError) {
+                    console.error('Update Micro Step Error:', updateError);
+                    await sendTelegramMessage(chatId, `Ошибка БД (UPDATE). Код: ${updateError.code}.`, 'HTML');
+                    return response.status(500).send('Database Update Error');
+                }
+
+                // Отправляем подтверждение и следующий вопрос
+                const confirmationMessage = `Хорошо. Ваша микро-привычка: *${microStepText}*.\n\nПомните: начинать нужно с легкого, чтобы не пропустить.\n\n*Правило 3: Сделайте ее Легкой.*`;
+                await sendTelegramMessage(chatId, confirmationMessage);
+
+                // Следующий вопрос: Местоположение (ШАГ 3 из 10)
+                await sendTelegramMessage(chatId, "*ШАГ 3 из 10: Где ты это сделаешь?*\n\nМы привязываем новую привычку к существующему действию. Это \"Связывание привычек\".\n\nНапиши, после какого ежедневного действия ты выполнишь эту привычку (например: \"После того, как заварю утренний кофе\", \"После того, как почищу зубы\", \"После того, как сяду за рабочий стол\").");
+            
+            // Заглушка для всех других состояний
             } else {
-                await sendTelegramMessage(chatId, `С возвращением! Твой текущий статус онбординга: *${userData.onboarding_state}*.\n\n_Пока что я могу обрабатывать только ответы на STEP_1._`);
+                await sendTelegramMessage(chatId, `С возвращением! Твой текущий статус онбординга: *${userData.onboarding_state}*.\n\n_Пока что я могу обрабатывать только ответы на STEP_1 и STEP_2._`);
             }
         }
         
@@ -149,7 +176,6 @@ export default async (request, response) => {
 
     } catch (e) {
         console.error('Webhook processing failed (uncaught):', e);
-        // Не пытаемся отправить сообщение в ТГ, чтобы избежать повторной ошибки "Body already read"
         response.status(500).send('Server Error');
     }
 };
