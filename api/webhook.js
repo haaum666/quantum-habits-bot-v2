@@ -149,7 +149,7 @@ export default async (request, response) => {
                 case 'STEP_7':
                     updatePayload = { obstacle_plan_1: textToSave, onboarding_state: 'STEP_8' };
                     confirmationMessage = `Препятствие определено: *${textToSave}*.\n\nМы готовы к борьбе.`;
-                    nextQuestion = "*ШАГ 8 из 10: План преодоления?*\n\nЕсли возникнет *${textToSave}*, то что ты сделаешь?\n\nНапиши план (например: \"Если устану, сделаю отжимание сразу после того, как приду домой\", \"Если забуду, поставлю будильник на 17:00\").";
+                    nextQuestion = `*ШАГ 8 из 10: План преодоления?*\n\nЕсли возникнет *${textToSave}*, то что ты сделаешь?\n\nНапиши план (например: "Если устану, сделаю отжимание сразу после того, как приду домой", "Если забуду, поставлю будильник на 17:00").`;
                     break;
                 case 'STEP_8':
                     updatePayload = { obstacle_plan_2: textToSave, onboarding_state: 'STEP_9' };
