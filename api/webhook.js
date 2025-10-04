@@ -4,14 +4,10 @@ import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
-// Используем Service Role Key для обхода RLS и максимальной надежности
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-// Инициализация клиента Supabase с Service Key
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY); 
-
-// Базовый URL для отправки ответов в Telegram API
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // 2. ФУНКЦИЯ ДЛЯ ОТВЕТА В TELEGRAM
@@ -65,7 +61,7 @@ export default async (request, response) => {
         // A. Проверка существования пользователя в базе
         const { data: userData, error: userError } = await supabase
             .from('users') 
-            .select('telegram_id, onboarding_state')
+            .select('telegram_id, onboarding_state, desired_identity, habit_micro_step, habit_link_action, habit_reward, habit_tracker')
             .eq('telegram_id', chatId)
             .single();
 
@@ -98,7 +94,6 @@ export default async (request, response) => {
                 }
             }
             
-            // Отправка первого вопроса
             const welcomeMessage = `👋 *Привет!* Я твой личный бот-помощник по методу \"Атомных Привычек\".\n\nЯ помогу тебе строить системы, которые приведут к 1% улучшению каждый день. \n\nДавай начнем с главного.`;
             await sendTelegramMessage(chatId, welcomeMessage);
             
@@ -111,7 +106,6 @@ export default async (request, response) => {
             const currentStep = userData.onboarding_state;
             const textToSave = incomingText.substring(0, 100);
             let updatePayload = {};
-            let nextState = '';
             let confirmationMessage = '';
             let nextQuestion = '';
 
@@ -149,6 +143,7 @@ export default async (request, response) => {
                 case 'STEP_7':
                     updatePayload = { obstacle_plan_1: textToSave, onboarding_state: 'STEP_8' };
                     confirmationMessage = `Препятствие определено: *${textToSave}*.\n\nМы готовы к борьбе.`;
+                    // ИСПРАВЛЕНО: Используем обратные кавычки (`) для интерполяции переменной
                     nextQuestion = `*ШАГ 8 из 10: План преодоления?*\n\nЕсли возникнет *${textToSave}*, то что ты сделаешь?\n\nНапиши план (например: "Если устану, сделаю отжимание сразу после того, как приду домой", "Если забуду, поставлю будильник на 17:00").`;
                     break;
                 case 'STEP_8':
@@ -164,22 +159,46 @@ export default async (request, response) => {
                 case 'STEP_10':
                     // Финальный шаг!
                     updatePayload = { repetition_schedule: textToSave, onboarding_state: 'COMPLETED' };
-                    nextState = 'COMPLETED'; // Устанавливаем статус завершения
-                    confirmationMessage = `🎉 *ОБОРДИНГ ЗАВЕРШЕН!* 🎉\n\nТы готов! Я буду отправлять тебе напоминания в *${textToSave}*.\n\nТвоя полная формула:\n*Идентичность:* ${userData.desired_identity || 'Не указана'}\n*Привычка:* ${userData.habit_micro_step || 'Не указана'}\n*Связка:* ${userData.habit_link_action || 'Не указана'}\n\n*Начни сейчас:* Твоя первая привычка: ${userData.habit_micro_step || 'Не указана'} СРАЗУ ПОСЛЕ ${userData.habit_link_action || 'Не указано'}.`;
-                    nextQuestion = null; // Нет следующего вопроса
+                    
+                    // 1. Обновляем БД (как обычно)
+                    const { error: updateErrorStep10 } = await supabase
+                        .from('users')
+                        .update(updatePayload)
+                        .eq('telegram_id', chatId);
+
+                    if (updateErrorStep10) {
+                        console.error(`Update Error (STEP_10):`, updateErrorStep10);
+                        await sendTelegramMessage(chatId, `Ошибка БД (UPDATE). Код: ${updateErrorStep10.code}.`, 'HTML');
+                        return response.status(500).send('Database Update Error');
+                    }
+                    
+                    // 2. ЗАГРУЖАЕМ ВСЕ ДАННЫЕ СВЕЖИМ ЗАПРОСОМ (ИСПРАВЛЕНИЕ)
+                    const { data: finalData, error: finalError } = await supabase
+                        .from('users') 
+                        .select('*') // Загружаем все поля
+                        .eq('telegram_id', chatId)
+                        .single();
+
+                    if (finalError) {
+                         console.error(`Final Data Fetch Error:`, finalError);
+                         await sendTelegramMessage(chatId, `Ошибка загрузки финальных данных: ${finalError.code}.`, 'HTML');
+                    }
+
+                    // 3. Составляем финальное сообщение
+                    confirmationMessage = `🎉 *ОБОРДИНГ ЗАВЕРШЕН!* 🎉\n\nТы готов! Я буду отправлять тебе напоминания в *${textToSave}*.\n\nТвоя полная формула:\n*Идентичность:* ${finalData.desired_identity || 'Не указана'}\n*Привычка:* ${finalData.habit_micro_step || 'Не указана'}\n*Связка:* ${finalData.habit_link_action || 'Не указана'}\n*Награда:* ${finalData.habit_reward || 'Не указана'}\n*Трекер:* ${finalData.habit_tracker || 'Не указана'}\n\n*Начни сейчас:* Твоя первая привычка: ${finalData.habit_micro_step || 'Не указана'} СРАЗУ ПОСЛЕ ${finalData.habit_link_action || 'Не указано'}.`;
+                    nextQuestion = null;
                     break;
                 case 'COMPLETED':
                     confirmationMessage = `Ты уже завершил онбординг! Твоя привычка: ${userData.habit_micro_step || 'Не указана'}. \n\n_Напиши /start, чтобы начать заново, или просто жди напоминания!_`;
                     nextQuestion = null;
                     break;
                 default:
-                    // Если состояние не распознано
                     confirmationMessage = `Ошибка! Неизвестный статус онбординга: *${currentStep}*.\n\nНапиши /start, чтобы начать заново.`;
                     nextQuestion = null;
             }
             
-            // Если мы не в состоянии 'COMPLETED', пытаемся обновить БД
-            if (currentStep !== 'COMPLETED' && currentStep !== 'ERROR' && currentStep !== 'DEFAULT') {
+            // Если мы не в состоянии 'STEP_10' или 'COMPLETED', пытаемся обновить БД (обработка STEP_1 - STEP_9)
+            if (currentStep !== 'STEP_10' && currentStep !== 'COMPLETED') {
 
                 const { error: updateError } = await supabase
                     .from('users')
@@ -193,14 +212,12 @@ export default async (request, response) => {
                 }
             }
             
-            // Отправляем сообщения
             await sendTelegramMessage(chatId, confirmationMessage);
             if (nextQuestion) {
                 await sendTelegramMessage(chatId, nextQuestion);
             }
         }
         
-        // Обязательный ответ 200 OK для Telegram
         response.status(200).send('Processed');
 
     } catch (e) {
