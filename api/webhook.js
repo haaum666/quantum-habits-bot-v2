@@ -58,10 +58,10 @@ export default async (request, response) => {
     const incomingText = message.text.trim();
 
     try {
-        // A. Проверка существования пользователя в базе
+        // A. Проверка существования пользователя в базе. Запрашиваем все поля, которые могут понадобиться.
         const { data: userData, error: userError } = await supabase
             .from('users') 
-            .select('telegram_id, onboarding_state, desired_identity, habit_micro_step, habit_link_action, habit_reward, habit_tracker')
+            .select('*') // * означает, что мы берем ВСЕ поля, это упрощает код.
             .eq('telegram_id', chatId)
             .single();
 
@@ -78,6 +78,7 @@ export default async (request, response) => {
         
         if (isStartCommand || !userData) {
             
+            // 1. Вставка нового пользователя (только если не существует)
             if (!userData) {
                 const { error: insertError } = await supabase
                     .from('users')
@@ -94,6 +95,20 @@ export default async (request, response) => {
                 }
             }
             
+            // 1.5. ИСПРАВЛЕНИЕ: Сброс состояния при команде /start, если пользователь уже существует
+            if (isStartCommand && userData && userData.onboarding_state !== 'STEP_1') {
+                 const { error: resetError } = await supabase
+                    .from('users')
+                    .update({ onboarding_state: 'STEP_1' })
+                    .eq('telegram_id', chatId);
+
+                if (resetError) {
+                    console.error('Reset State Error:', resetError);
+                    await sendTelegramMessage(chatId, `Ошибка сброса статуса: ${resetError.code}.`, 'HTML');
+                }
+            }
+            
+            // 2. Отправка первого вопроса
             const welcomeMessage = `👋 *Привет!* Я твой личный бот-помощник по методу \"Атомных Привычек\".\n\nЯ помогу тебе строить системы, которые приведут к 1% улучшению каждый день. \n\nДавай начнем с главного.`;
             await sendTelegramMessage(chatId, welcomeMessage);
             
@@ -143,7 +158,6 @@ export default async (request, response) => {
                 case 'STEP_7':
                     updatePayload = { obstacle_plan_1: textToSave, onboarding_state: 'STEP_8' };
                     confirmationMessage = `Препятствие определено: *${textToSave}*.\n\nМы готовы к борьбе.`;
-                    // ИСПРАВЛЕНО: Используем обратные кавычки (`) для интерполяции переменной
                     nextQuestion = `*ШАГ 8 из 10: План преодоления?*\n\nЕсли возникнет *${textToSave}*, то что ты сделаешь?\n\nНапиши план (например: "Если устану, сделаю отжимание сразу после того, как приду домой", "Если забуду, поставлю будильник на 17:00").`;
                     break;
                 case 'STEP_8':
@@ -172,17 +186,12 @@ export default async (request, response) => {
                         return response.status(500).send('Database Update Error');
                     }
                     
-                    // 2. ЗАГРУЖАЕМ ВСЕ ДАННЫЕ СВЕЖИМ ЗАПРОСОМ (ИСПРАВЛЕНИЕ)
-                    const { data: finalData, error: finalError } = await supabase
-                        .from('users') 
-                        .select('*') // Загружаем все поля
-                        .eq('telegram_id', chatId)
-                        .single();
-
-                    if (finalError) {
-                         console.error(`Final Data Fetch Error:`, finalError);
-                         await sendTelegramMessage(chatId, `Ошибка загрузки финальных данных: ${finalError.code}.`, 'HTML');
-                    }
+                    // 2. ЗАГРУЖАЕМ ВСЕ ДАННЫЕ СВЕЖИМ ЗАПРОСОМ 
+                    // (Используем текущий объект userData, который был загружен,
+                    // и просто обновляем его из памяти для финального сообщения)
+                    
+                    // Убедимся, что все поля заполнены, используя обновленные данные
+                    const finalData = { ...userData, ...updatePayload };
 
                     // 3. Составляем финальное сообщение
                     confirmationMessage = `🎉 *ОБОРДИНГ ЗАВЕРШЕН!* 🎉\n\nТы готов! Я буду отправлять тебе напоминания в *${textToSave}*.\n\nТвоя полная формула:\n*Идентичность:* ${finalData.desired_identity || 'Не указана'}\n*Привычка:* ${finalData.habit_micro_step || 'Не указана'}\n*Связка:* ${finalData.habit_link_action || 'Не указана'}\n*Награда:* ${finalData.habit_reward || 'Не указана'}\n*Трекер:* ${finalData.habit_tracker || 'Не указана'}\n\n*Начни сейчас:* Твоя первая привычка: ${finalData.habit_micro_step || 'Не указана'} СРАЗУ ПОСЛЕ ${finalData.habit_link_action || 'Не указано'}.`;
