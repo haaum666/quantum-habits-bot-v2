@@ -1,0 +1,13 @@
+{
+  "name": "quantum-habits-bot-v2",
+  "version": "1.0.0",
+  "description": "Telegram bot for Atomic Habits based on Vercel and Supabase.",
+  "main": "api/webhook.js",
+  "type": "module",
+  "scripts": {
+    "start": "node api/webhook.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.43.4"
+  }
+}
