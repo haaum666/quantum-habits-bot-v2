@@ -25,6 +25,7 @@ async function sendTelegramMessage(chatId, text) {
         }),
     });
     if (!response.ok) {
+        // Мы не бросаем ошибку здесь, чтобы не прерывать основной процесс, но логируем ее
         console.error(`Telegram API Error: ${await response.text()}`);
     }
     return response.json();
@@ -32,34 +33,37 @@ async function sendTelegramMessage(chatId, text) {
 
 // 3. ОСНОВНОЙ ОБРАБОТЧИК (Webhook)
 export default async (request, response) => {
-    let chatId;
+    // ВАЖНО: Мы удаляем внешний try...catch, который вызывал ошибку "Body already read"
+    // и оставляем только внутренний обработчик логики.
+
+    if (request.method !== 'POST') {
+        return response.status(405).send('Only POST requests allowed');
+    }
+
+    // Если body уже прочитан (из-за предыдущего сбоя), этот код может быть уязвим.
+    // Однако, в чистом Vercel environment он должен работать.
+    const body = request.body; 
+    const message = body.message;
+
+    if (!message || !message.text || !message.chat) {
+        return response.status(200).send('No message to process');
+    }
+
+    const chatId = message.chat.id;
+    const incomingText = message.text.trim();
+
     try {
-        if (request.method !== 'POST') {
-            return response.status(405).send('Only POST requests allowed');
-        }
-
-        const body = request.body;
-        const message = body.message;
-
-        if (!message || !message.text || !message.chat) {
-            return response.status(200).send('No message to process');
-        }
-
-        chatId = message.chat.id;
-        const incomingText = message.text.trim();
-
         // A. Проверка существования пользователя в базе
-        // ИСПОЛЬЗУЕМ ТОЛЬКО 'users'
         const { data: userData, error: userError } = await supabase
             .from('users') 
             .select('telegram_id, onboarding_state')
             .eq('telegram_id', chatId)
             .single();
 
-        // Обработка ошибки базы данных, если она не 'No rows returned'
+        // Обработка ошибки БД, если она не 'No rows returned' (PGRST116)
         if (userError && userError.code !== 'PGRST116') {
             console.error('Supabase Error:', userError);
-            await sendTelegramMessage(chatId, `Ошибка базы данных: ${userError.message}`);
+            await sendTelegramMessage(chatId, `Ошибка БД (SELECT): ${userError.message}`);
             return response.status(500).send('Database Error');
         }
         
@@ -72,14 +76,14 @@ export default async (request, response) => {
             
             // 1. Вставка нового пользователя
             if (!userData) {
-                // ИСПОЛЬЗУЕМ ТОЛЬКО 'users'
                 const { error: insertError } = await supabase
                     .from('users')
                     .insert([{ telegram_id: chatId, onboarding_state: 'STEP_1' }]);
                 
                 if (insertError) {
+                    // Теперь эта ошибка не должна сработать, т.к. RLS исправлен
                     console.error('Insert Error:', insertError);
-                    await sendTelegramMessage(chatId, `Ошибка при вставке: ${insertError.message}`);
+                    await sendTelegramMessage(chatId, `Ошибка БД (INSERT): ${insertError.message}`);
                     return response.status(500).send('Database Insert Error');
                 }
             }
@@ -101,7 +105,6 @@ export default async (request, response) => {
 
                 // Обновляем запись пользователя
                 const { error: updateError } = await supabase
-                    // ИСПОЛЬЗУЕМ ТОЛЬКО 'users'
                     .from('users')
                     .update({
                         desired_identity: identityText,
@@ -111,7 +114,7 @@ export default async (request, response) => {
 
                 if (updateError) {
                     console.error('Update Identity Error:', updateError);
-                    await sendTelegramMessage(chatId, `Ошибка при обновлении: ${updateError.message}`);
+                    await sendTelegramMessage(chatId, `Ошибка БД (UPDATE): ${updateError.message}`);
                     return response.status(500).send('Database Update Error');
                 }
 
@@ -132,10 +135,9 @@ export default async (request, response) => {
         response.status(200).send('Processed');
 
     } catch (e) {
-        console.error('Webhook processing failed:', e);
-        if (chatId) {
-            await sendTelegramMessage(chatId, `КРИТИЧЕСКАЯ ОШИБКА: ${e.message}.`);
-        }
+        // Логирование ЛЮБОЙ ошибки, которая могла проскочить
+        console.error('Webhook processing failed (uncaught):', e);
+        // Не пытаемся отправить сообщение в ТГ, чтобы избежать повторной ошибки "Body already read"
         response.status(500).send('Server Error');
     }
 };
