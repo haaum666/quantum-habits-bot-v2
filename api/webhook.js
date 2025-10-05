@@ -10,17 +10,15 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY); 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
-// 2. КОНСТАНТЫ КЛАВИАТУРЫ
-// ReplyKeyboard обеспечивает скрытие/восстановление через иконку
+// 2. КОНСТАНТЫ КЛАВИАТУРЫ (Классические эмодзи)
 const COMPLETED_KEYBOARD = {
     keyboard: [
-        [{ text: '✅ Готово' }], // Первая строка: самое частое действие
-        [{ text: '📊 Мой Прогресс' }, { text: '🏆 Лидерборд' }] // Вторая строка: отчеты
+        [{ text: '✅ Готово' }], 
+        [{ text: '📊 Мой Прогресс' }, { text: '🏆 Лидерборд' }] 
     ],
-    resize_keyboard: true, // Делает клавиатуру компактной
-    one_time_keyboard: false, // Клавиатура не исчезнет после нажатия
+    resize_keyboard: true, 
+    one_time_keyboard: false, 
 };
-// Клавиатура для удаления меню, если понадобится
 const REMOVE_KEYBOARD = {
     remove_keyboard: true,
 };
@@ -49,7 +47,22 @@ async function sendTelegramMessage(chatId, text, keyboard = null, parse_mode = '
     return response.json();
 }
 
-// 4. ОСНОВНОЙ ОБРАБОТЧИК (Webhook)
+// 4. НОВАЯ ФУНКЦИЯ: СТАТУС ПЕЧАТАЕТ...
+async function sendChatAction(chatId, action = 'typing') {
+    const response = await fetch(`${TELEGRAM_API}/sendChatAction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            chat_id: chatId,
+            action: action, 
+        }),
+    });
+    // Не обрабатываем ошибку, так как это не критично для логики
+    // return response.json();
+}
+
+
+// 5. ОСНОВНОЙ ОБРАБОТЧИК (Webhook)
 export default async (request, response) => {
     
     if (request.method !== 'POST') {
@@ -78,14 +91,13 @@ export default async (request, response) => {
 
     const chatId = message.chat.id;
     const incomingText = message.text.trim();
-    // НОВОЕ: Извлекаем имя пользователя для персонализации
-    const userFirstName = message.from.first_name || 'Пользователь'; 
+    const userFirstName = message.from.first_name || 'друг'; 
 
     try {
         // A. Проверка существования пользователя в базе.
         const { data: userData, error: userError } = await supabase
             .from('users') 
-            .select('*') // Загружаем все поля
+            .select('*') 
             .eq('telegram_id', chatId)
             .single();
 
@@ -102,7 +114,7 @@ export default async (request, response) => {
         
         if (isStartCommand || !userData) {
             
-            // 1. Вставка нового пользователя (только если не существует)
+            // 1. Вставка нового пользователя
             if (!userData) {
                 const { error: insertError } = await supabase
                     .from('users')
@@ -119,7 +131,7 @@ export default async (request, response) => {
                 }
             }
             
-            // 1.5. ИСПРАВЛЕНИЕ: Сброс состояния при команде /start, если пользователь уже существует
+            // 1.5. Сброс состояния при команде /start
             if (isStartCommand && userData && userData.onboarding_state !== 'STEP_1') {
                  const { error: resetError } = await supabase
                     .from('users')
@@ -131,15 +143,19 @@ export default async (request, response) => {
                     await sendTelegramMessage(chatId, `Ошибка сброса статуса: ${resetError.code}.`, 'HTML');
                 }
                 
-                // Удаляем клавиатуру перед онбордингом, чтобы не мешала
+                // Удаляем клавиатуру перед онбордингом
                 await sendTelegramMessage(chatId, '...', REMOVE_KEYBOARD, 'HTML');
             }
             
             // 2. Отправка первого вопроса
-            // ОБНОВЛЕННЫЙ welcomeMessage:
             const welcomeMessage = `🧠 Привет, *${userFirstName}*. Ты в системе *Квантумных Привычек*.\n\n*ХОЧЕШЬ СТАТЬ ЛУЧШЕЙ ВЕРСИЕЙ СЕБЯ?*\n\nПрекрасно. Твоя новая Идентичность начинается прямо сейчас.\n\nПервый шаг — понять, **КЕМ ты хочешь стать**.`;
+            
+            // ИСПОЛЬЗУЕМ TYPING:
+            await sendChatAction(chatId, 'typing');
             await sendTelegramMessage(chatId, welcomeMessage);
             
+            // ИСПОЛЬЗУЕМ TYPING ПЕРЕД ВТОРЫМ СООБЩЕНИЕМ:
+            await sendChatAction(chatId, 'typing');
             await sendTelegramMessage(chatId, "*ШАГ 1 из 10: КЕМ ты хочешь стать?*\n\nВся сила в Идентичности. Напиши, кем ты хочешь стать благодаря своим привычкам (например: \"Здоровым и энергичным\", \"Продуктивным и организованным\", \"Образованным и развитым\").");
 
         // ===============================================
@@ -157,43 +173,32 @@ export default async (request, response) => {
                 const habitName = userData.habit_micro_step || 'Не указана';
                 const identity = userData.desired_identity || 'Не указана';
                 
-                // 1. КОМАНДА /stats или КНОПКА (ОБНОВЛЕНО)
+                // Обработка кнопок
                 if (incomingText.startsWith('/stats') || incomingText === '📊 Мой Прогресс') {
-                    
                     confirmationMessage = `📊 *ТВОЯ СТАТИСТИКА* (В разработке)\n\n*Текущая Привычка:* ${habitName}\n*Идентичность:* ${identity}\n\n*Текущая серия:* 0 дней (Начните логгировать!)\n*Всего голосов за Идентичность:* ${userData.habit_votes_count || 0}\n\nДля полного отчета ожидайте ночной перерасчет.`;
-                    
-                // 2. КОМАНДА /leaderboard или КНОПКА (ОБНОВЛЕНО)
                 } else if (incomingText.startsWith('/leaderboard') || incomingText === '🏆 Лидерборд') { 
-    
                     confirmationMessage = `🏆 *ЛИДЕРБОРД* (В разработке)\n\nЭта функция покажет ваш ранг среди других пользователей. \n\n_Помните: каждый голос за Идентичность продвигает вас вверх._`;
-
-                // 3. КОМАНДА /done (Логгирование) или КНОПКА (ОБНОВЛЕНО)
                 } else if (incomingText.startsWith('/done') || incomingText.startsWith('/yes') || incomingText === '✅ Готово') {
                     
                     const newVoteCount = (userData.habit_votes_count || 0) + 1;
                     
                     const { error: voteError } = await supabase
                         .from('users')
-                        .update({ 
-                            habit_votes_count: newVoteCount,
-                        })
+                        .update({ habit_votes_count: newVoteCount })
                         .eq('telegram_id', chatId);
 
                     if (voteError) {
-                        console.error('Vote Error:', voteError);
                         confirmationMessage = `Ошибка при логгировании: ${voteError.code}.`;
                     } else {
                         confirmationMessage = `🔥 *ВЫПОЛНЕНО!* 🔥\n\nТвоя привычка: *${habitName}* зачтена.\n\nЭто *${newVoteCount}-й голос* за твою Идентичность: *${identity}*.\n\n_Каждый день ты становишься на 1% лучше._`;
                     }
-                
-                // 4. ОБЫЧНЫЙ ТЕКСТ (Повторение статуса)
                 } else {
                     confirmationMessage = `Ты уже завершил онбординг! Твоя привычка: ${habitName}. \n\n_Используй кнопки ниже для логгирования или отчета._`;
                 }
 
                 nextQuestion = null;
                 
-                // ЛОГИКА ОТПРАВКИ КЛАВИАТУРЫ
+                // Отправка сообщения с клавиатурой
                 await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
                 return response.status(200).send('Processed');
 
@@ -250,7 +255,6 @@ export default async (request, response) => {
                         // Финальный шаг!
                         updatePayload = { repetition_schedule: textToSave, onboarding_state: 'COMPLETED' };
                         
-                        // 1. Обновляем БД (как обычно)
                         const { error: updateErrorStep10 } = await supabase
                             .from('users')
                             .update(updatePayload)
@@ -262,15 +266,12 @@ export default async (request, response) => {
                             return response.status(500).send('Database Update Error');
                         }
                         
-                        // 2. Используем текущий объект userData, который был загружен,
-                        // и просто обновляем его из памяти для финального сообщения
                         const finalData = { ...userData, ...updatePayload };
 
                         // 3. Составляем финальное сообщение
                         confirmationMessage = `🎉 *ОНБОРДИНГ ЗАВЕРШЕН!* 🎉\n\nТы готов! Я буду отправлять тебе напоминания в *${textToSave}*.\n\nТвоя полная формула:\n*Идентичность:* ${finalData.desired_identity || 'Не указана'}\n*Привычка:* ${finalData.habit_micro_step || 'Не указана'}\n*Связка:* ${finalData.habit_link_action || 'Не указана'}\n*Награда:* ${finalData.habit_reward || 'Не указана'}\n*Трекер:* ${finalData.habit_tracker || 'Не указан'}\n\n*Начни сейчас:* Твоя первая привычка: ${finalData.habit_micro_step || 'Не указана'} СРАЗУ ПОСЛЕ ${finalData.habit_link_action || 'Не указано'}.`;
                         nextQuestion = null;
                         
-                        // ОТПРАВКА С КЛАВИАТУРОЙ!
                         await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
                         return response.status(200).send('Processed');
 
@@ -295,10 +296,12 @@ export default async (request, response) => {
                 }
             }
             
-            // Отправка сообщений в онбординге (кроме STEP_10, который обрабатывается выше)
+            // Отправка сообщений в онбординге (с использованием TYPING)
             if (currentStep !== 'STEP_10') {
+                await sendChatAction(chatId, 'typing');
                 await sendTelegramMessage(chatId, confirmationMessage);
                 if (nextQuestion) {
+                    await sendChatAction(chatId, 'typing'); // Typing перед вторым сообщением
                     await sendTelegramMessage(chatId, nextQuestion);
                 }
             }
