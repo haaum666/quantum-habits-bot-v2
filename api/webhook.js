@@ -24,7 +24,12 @@ const REMOVE_KEYBOARD = {
 };
 
 
-// 3. ФУНКЦИЯ ДЛЯ ОТВЕТА В TELEGRAM
+// 3. НОВАЯ ФУНКЦИЯ: ЗАДЕРЖКА (DELAY)
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// 4. ФУНКЦИЯ ДЛЯ ОТВЕТА В TELEGRAM
 async function sendTelegramMessage(chatId, text, keyboard = null, parse_mode = 'Markdown') {
     const payload = {
         chat_id: chatId,
@@ -47,9 +52,10 @@ async function sendTelegramMessage(chatId, text, keyboard = null, parse_mode = '
     return response.json();
 }
 
-// 4. НОВАЯ ФУНКЦИЯ: СТАТУС ПЕЧАТАЕТ...
+// 5. ФУНКЦИЯ: СТАТУС ПЕЧАТАЕТ...
 async function sendChatAction(chatId, action = 'typing') {
-    const response = await fetch(`${TELEGRAM_API}/sendChatAction`, {
+    // Вызов API для установки статуса
+    await fetch(`${TELEGRAM_API}/sendChatAction`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -58,11 +64,10 @@ async function sendChatAction(chatId, action = 'typing') {
         }),
     });
     // Не обрабатываем ошибку, так как это не критично для логики
-    // return response.json();
 }
 
 
-// 5. ОСНОВНОЙ ОБРАБОТЧИК (Webhook)
+// 6. ОСНОВНОЙ ОБРАБОТЧИК (Webhook)
 export default async (request, response) => {
     
     if (request.method !== 'POST') {
@@ -150,12 +155,14 @@ export default async (request, response) => {
             // 2. Отправка первого вопроса
             const welcomeMessage = `🧠 Привет, *${userFirstName}*. Ты в системе *Квантумных Привычек*.\n\n*ХОЧЕШЬ СТАТЬ ЛУЧШЕЙ ВЕРСИЕЙ СЕБЯ?*\n\nПрекрасно. Твоя новая Идентичность начинается прямо сейчас.\n\nПервый шаг — понять, **КЕМ ты хочешь стать**.`;
             
-            // ИСПОЛЬЗУЕМ TYPING:
+            // ИСПОЛЬЗУЕМ TYPING и DELAY:
             await sendChatAction(chatId, 'typing');
+            await delay(500); 
             await sendTelegramMessage(chatId, welcomeMessage);
             
             // ИСПОЛЬЗУЕМ TYPING ПЕРЕД ВТОРЫМ СООБЩЕНИЕМ:
             await sendChatAction(chatId, 'typing');
+            await delay(500); 
             await sendTelegramMessage(chatId, "*ШАГ 1 из 10: КЕМ ты хочешь стать?*\n\nВся сила в Идентичности. Напиши, кем ты хочешь стать благодаря своим привычкам (например: \"Здоровым и энергичным\", \"Продуктивным и организованным\", \"Образованным и развитым\").");
 
         // ===============================================
@@ -296,12 +303,14 @@ export default async (request, response) => {
                 }
             }
             
-            // Отправка сообщений в онбординге (с использованием TYPING)
+            // Отправка сообщений в онбординге (с использованием TYPING и DELAY)
             if (currentStep !== 'STEP_10') {
                 await sendChatAction(chatId, 'typing');
+                await delay(500); // 0.5s пауза
                 await sendTelegramMessage(chatId, confirmationMessage);
                 if (nextQuestion) {
-                    await sendChatAction(chatId, 'typing'); // Typing перед вторым сообщением
+                    await sendChatAction(chatId, 'typing'); 
+                    await delay(500); // 0.5s пауза
                     await sendTelegramMessage(chatId, nextQuestion);
                 }
             }
