@@ -29,6 +29,7 @@ function delay(ms) {
 
 // =================================================================
 // НОВАЯ ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ГЕНЕРАЦИЯ ФИОЛЕТОВО-СЕРОГО ПРОГРЕСС-БАРА
+// (Подпись убрана по запросу пользователя)
 // =================================================================
 
 function generateSidebar(currentStepNumber) {
@@ -42,8 +43,7 @@ function generateSidebar(currentStepNumber) {
             sidebar += '▱'; // Светло-серый (незаполненный)
         }
     }
-    // Добавляем цифры в конце, чтобы сохранить контекст: (Шаг X из 9)
-    sidebar += ` (Шаг ${currentStepNumber} из 9)`;
+    // УБРАНО: sidebar += ` (Шаг ${currentStepNumber} из 9)`;
     return sidebar.trim();
 }
 
@@ -178,12 +178,12 @@ export default async (request, response) => {
 
             // ИСПОЛЬЗУЕМ TYPING и DELAY (ОБНОВЛЕНО: 1000 мс)
             await sendChatAction(chatId, 'typing');
-            await delay(1000); // <-- ИЗМЕНЕНО: 1000 мс
+            await delay(1000); // <-- 1000 мс
             await sendTelegramMessage(chatId, welcomeMessage);
             
             // ИСПОЛЬЗУЕМ TYPING ПЕРЕД ВТОРЫМ СООБЩЕНИЕМ (ОБНОВЛЕНО: 1000 мс)
             await sendChatAction(chatId, 'typing');
-            await delay(1000); // <-- ИЗМЕНЕНО: 1000 мс
+            await delay(1000); // <-- 1000 мс
             await sendTelegramMessage(chatId, step1Question);
 
         // ===============================================
@@ -355,11 +355,11 @@ export default async (request, response) => {
             // Отправка сообщений в онбординге (с использованием TYPING и DELAY)
             if (currentStep !== 'STEP_9') {
                 await sendChatAction(chatId, 'typing');
-                await delay(1000); // <-- ИЗМЕНЕНО: 1000 мс
+                await delay(1000); // <-- 1000 мс
                 await sendTelegramMessage(chatId, confirmationMessage);
                 if (nextQuestion) {
                     await sendChatAction(chatId, 'typing');
-                    await delay(1000); // <-- ИЗМЕНЕНО: 1000 мс
+                    await delay(1000); // <-- 1000 мс
                     await sendTelegramMessage(chatId, nextQuestion);
                 }
             }
