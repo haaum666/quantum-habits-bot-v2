@@ -160,7 +160,7 @@ export default async (request, response) => {
             
             // ИСПОЛЬЗУЕМ TYPING ПЕРЕД ВТОРЫМ СООБЩЕНИЕМ:
             await sendChatAction(chatId, 'typing');
-            await delay(1000);
+            await delay(1500);
             await sendTelegramMessage(chatId, step1Question);
 
         // ===============================================
@@ -335,7 +335,7 @@ export default async (request, response) => {
                 await sendTelegramMessage(chatId, confirmationMessage);
                 if (nextQuestion) {
                     await sendChatAction(chatId, 'typing');
-                    await delay(1000); // 1.0s пауза
+                    await delay(1500); // 1.0s пауза
                     await sendTelegramMessage(chatId, nextQuestion);
                 }
             }
