@@ -3,6 +3,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
+// Скрытые символы удалены, заменена SUPABASE_SERVICE_KEY
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -106,9 +107,11 @@ export default async (request, response) => {
             .eq('telegram_id', chatId)
             .single();
 
+        // Ошибка БД, не связанная с отсутствием пользователя (PGRST116), должна быть отловлена.
         if (userError && userError.code !== 'PGRST116') {
             console.error('Supabase Error (SELECT):', userError);
             await sendTelegramMessage(chatId, `Критическая ошибка БД. Код: ${userError.code}.`, 'HTML');
+            // Здесь мы возвращаем 500, так как DB не работает.
             return response.status(500).send('Database Error');
         }
         
@@ -152,25 +155,28 @@ export default async (request, response) => {
                 await sendTelegramMessage(chatId, '...', REMOVE_KEYBOARD, 'HTML');
             }
             
-            // 2. Отправка первого вопроса
-            const welcomeMessage = `🧠 Привет, *${userFirstName}*. Ты в системе *Квантумных Привычек*.\n\n*ХОЧЕШЬ СТАТЬ ЛУЧШЕЙ ВЕРСИЕЙ СЕБЯ?*\n\nПрекрасно. Твоя новая Идентичность начинается прямо сейчас.\n\nПервый шаг — понять, **Каким ты хочешь стать**.`;
-            
-            // ИСПОЛЬЗУЕМ TYPING и DELAY:
+            // 2. Отправка первого вопроса (С ИСПРАВЛЕННЫМИ СООБЩЕНИЯМИ)
+            const welcomeMessage = `🧠 Привет, *${userFirstName}*. Ты в системе *Квантумных Привычек*.\n\n*ХОЧЕШЬ СТАТЬ ЛУЧШЕЙ ВЕРСИЕЙ СЕБЯ?*\n\nПрекрасно. Твоя новая Идентичность начинается прямо сейчас.\n\nПервый шаг — понять, **КЕМ ты хочешь стать**.`;
+            const step1Question = "*ШАГ 1 из 10: ТВОЙ ГОЛОС ЗА ИДЕНТИЧНОСТЬ*\n\nЭто самое главное. Каждое действие — это **голос** за ту личность, которой ты станешь. \n\nНапиши, кем ты хочешь стать (например: \"Здоровым и энергичным\", \"Продуктивным и организованным\", \"Человеком-Системой\").";
+
+
+            // ИСПОЛЬЗУЕМ TYPING и DELAY (1000 мс):
             await sendChatAction(chatId, 'typing');
-            await delay(500); 
+            await delay(1000); 
             await sendTelegramMessage(chatId, welcomeMessage);
             
             // ИСПОЛЬЗУЕМ TYPING ПЕРЕД ВТОРЫМ СООБЩЕНИЕМ:
             await sendChatAction(chatId, 'typing');
-            await delay(500); 
-            await sendTelegramMessage(chatId, "*ШАГ 1 из 10: Напиши, каким ты хочешь стать благодаря своим новым привычкам? (например: \"Здоровым и энергичным\", \"Продуктивным и организованным\", \"Образованным и развитым\").");
+            await delay(1000); 
+            await sendTelegramMessage(chatId, step1Question);
 
         // ===============================================
         // ЛОГИКА 2: ОБРАБОТКА ТЕКСТА (Онбординг и Рабочий Режим)
         // ===============================================
         } else {
             const currentStep = userData.onboarding_state;
-            const textToSave = incomingText.substring(0, 100);
+            // Удостоверимся, что текст сохраняем до 100 символов, чтобы избежать ошибок.
+            const textToSave = incomingText.substring(0, 100); 
             let updatePayload = {};
             let confirmationMessage = '';
             let nextQuestion = '';
@@ -306,11 +312,11 @@ export default async (request, response) => {
             // Отправка сообщений в онбординге (с использованием TYPING и DELAY)
             if (currentStep !== 'STEP_10') {
                 await sendChatAction(chatId, 'typing');
-                await delay(500); // 0.5s пауза
+                await delay(1000); // 1.0s пауза
                 await sendTelegramMessage(chatId, confirmationMessage);
                 if (nextQuestion) {
                     await sendChatAction(chatId, 'typing'); 
-                    await delay(500); // 0.5s пауза
+                    await delay(1000); // 1.0s пауза
                     await sendTelegramMessage(chatId, nextQuestion);
                 }
             }
