@@ -211,14 +211,30 @@ export default async (request, response) => {
                     
                     const newVoteCount = (userData.habit_votes_count || 0) + 1;
                     
-                    // --- ОБНОВЛЕННАЯ ЛОГИКА: КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ ---
+                    // --- ОБНОВЛЕННАЯ ЛОГИКА: КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ И ЛОГГИРОВАНИЕ ---
+                    // 1. Обновление счетчика голосов (исправлено от PGRST204)
                     const { error: voteError } = await supabase
                         .from('users')
                         .update({ habit_votes_count: newVoteCount })
-                        .eq('telegram_id', chatId);
+                        .eq('telegram_id', chatId)
+                        .select('*'); 
+                    
+                    // 2. СОХРАНЕНИЕ ЛОГА ВЫПОЛНЕНИЯ (НОВЫЙ БЛОК)
+                    const { error: logError } = await supabase
+                         .from('habit_logs')
+                         .insert([
+                             {
+                                 telegram_id: chatId,
+                                 habit_identifier: userData.habit_identifier || 'unknown',
+                                 completed_at: new Date().toISOString(), // Используем текущее время
+                                 // Сюда в будущем добавится actual_count (для счетных привычек)
+                             }
+                         ]);
 
-                    if (voteError) {
-                        confirmationMessage = `Ошибка при логгировании: ${voteError.code}.`;
+
+                    if (voteError || logError) {
+                        console.error('Logging Error (Vote/Log):', voteError || logError);
+                        confirmationMessage = `Критическая ошибка при логгировании: ${voteError?.code || logError?.code}. Убедитесь, что таблица *habit_logs* создана и правильно настроена.`;
                     } else {
                         const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                         
