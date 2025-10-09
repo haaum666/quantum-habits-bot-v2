@@ -28,8 +28,7 @@ function delay(ms) {
 }
 
 // =================================================================
-// НОВАЯ ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ГЕНЕРАЦИЯ ФИОЛЕТОВО-СЕРОГО ПРОГРЕСС-БАРА
-// (Подпись убрана по запросу пользователя)
+// ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ГЕНЕРАЦИЯ ФИОЛЕТОВО-СЕРОГО ПРОГРЕСС-БАРА
 // =================================================================
 
 function generateSidebar(currentStepNumber) {
@@ -37,13 +36,12 @@ function generateSidebar(currentStepNumber) {
     for (let i = 1; i <= 9; i++) {
         if (i <= currentStepNumber) {
             // Пройденные и текущий шаги: Фиолетовый закрашенный квадрат
-            sidebar += '▰'; // Фиолетовый (заполненный)
+            sidebar += '▰'; 
         } else {
             // Предстоящие шаги: Светло-серый незакрашенный квадрат
-            sidebar += '▱'; // Светло-серый (незаполненный)
+            sidebar += '▱'; 
         }
     }
-    // УБРАНО: sidebar += ` (Шаг ${currentStepNumber} из 9)`;
     return sidebar.trim();
 }
 
@@ -178,12 +176,12 @@ export default async (request, response) => {
 
             // ИСПОЛЬЗУЕМ TYPING и DELAY (ОБНОВЛЕНО: 1000 мс)
             await sendChatAction(chatId, 'typing');
-            await delay(1000); // <-- 1000 мс
+            await delay(1000); 
             await sendTelegramMessage(chatId, welcomeMessage);
             
             // ИСПОЛЬЗУЕМ TYPING ПЕРЕД ВТОРЫМ СООБЩЕНИЕМ (ОБНОВЛЕНО: 1000 мс)
             await sendChatAction(chatId, 'typing');
-            await delay(1000); // <-- 1000 мс
+            await delay(1000); 
             await sendTelegramMessage(chatId, step1Question);
 
         // ===============================================
@@ -221,7 +219,6 @@ export default async (request, response) => {
                         .select('*'); 
                     
                     // 2. СОХРАНЕНИЕ ЛОГА ВЫПОЛНЕНИЯ (В habit_logs)
-                    // Убираем .select('*') из INSERT и будем игнорировать PGRST204 при проверке
                     const { error: logError } = await supabase
                          .from('habit_logs')
                          .insert([
@@ -246,7 +243,8 @@ export default async (request, response) => {
                     } else {
                         const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                         
-                        confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${newVoteCount}-й голос* за твою Идентичность: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей системе 💪_`;
+                        // --- ОКОНЧАТЕЛЬНО УТВЕРЖДЕННЫЙ ТЕКСТ ---
+                        confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${newVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
                     }
                     // --------------------------------------------------------
                 } else {
@@ -383,11 +381,11 @@ export default async (request, response) => {
             // Отправка сообщений в онбординге (с использованием TYPING и DELAY)
             if (currentStep !== 'STEP_9') {
                 await sendChatAction(chatId, 'typing');
-                await delay(1000); // <-- 1000 мс
+                await delay(1000); 
                 await sendTelegramMessage(chatId, confirmationMessage);
                 if (nextQuestion) {
                     await sendChatAction(chatId, 'typing');
-                    await delay(1000); // <-- 1000 мс
+                    await delay(1000); 
                     await sendTelegramMessage(chatId, nextQuestion);
                 }
             }
