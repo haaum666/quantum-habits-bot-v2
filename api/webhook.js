@@ -212,27 +212,35 @@ export default async (request, response) => {
                     const newVoteCount = (userData.habit_votes_count || 0) + 1;
                     
                     // --- ОБНОВЛЕННАЯ ЛОГИКА: КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ И ЛОГГИРОВАНИЕ ---
-                    // 1. Обновление счетчика голосов (исправлено от PGRST204)
+                    
+                    // 1. Обновление счетчика голосов (используем select('*') для избежания PGRST204)
                     const { error: voteError } = await supabase
                         .from('users')
                         .update({ habit_votes_count: newVoteCount })
                         .eq('telegram_id', chatId)
                         .select('*'); 
                     
-                    // 2. СОХРАНЕНИЕ ЛОГА ВЫПОЛНЕНИЯ (НОВЫЙ БЛОК)
+                    // 2. СОХРАНЕНИЕ ЛОГА ВЫПОЛНЕНИЯ (В habit_logs)
+                    // Убираем .select('*') из INSERT и будем игнорировать PGRST204 при проверке
                     const { error: logError } = await supabase
                          .from('habit_logs')
                          .insert([
                              {
                                  telegram_id: chatId,
                                  habit_identifier: userData.habit_identifier || 'unknown',
-                                 completed_at: new Date().toISOString(), // Используем текущее время
-                                 // Сюда в будущем добавится actual_count (для счетных привычек)
+                                 completed_at: new Date().toISOString(),
                              }
                          ]);
 
 
-                    if (voteError || logError) {
+                    // ИСПРАВЛЕННАЯ ЛОГИКА ПРОВЕРКИ ОШИБОК: 
+                    // PGRST204 при INSERT/UPDATE - это успех без контента, который библиотека видит как ошибку.
+                    const isCritcalError = 
+                        (voteError && voteError.code !== 'PGRST204') || 
+                        (logError && logError.code !== 'PGRST204');
+
+
+                    if (isCritcalError) {
                         console.error('Logging Error (Vote/Log):', voteError || logError);
                         confirmationMessage = `Критическая ошибка при логгировании: ${voteError?.code || logError?.code}. Убедитесь, что таблица *habit_logs* создана и правильно настроена.`;
                     } else {
