@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOTK_TOKEN;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // ИСПРАВЛЕНО: Убрал K
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -126,19 +126,13 @@ export default async (request, response) => {
         return response.status(405).send('Only POST requests allowed');
     }
 
-    let body;
-    try {
-        const rawBody = await new Promise((resolve) => {
-            let data = '';
-            request.on('data', chunk => data += chunk);
-            request.on('end', () => resolve(data));
-        });
-        body = JSON.parse(rawBody);
+    // 🔴 ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Используем request.body (стандарт Vercel/Next.js)
+    const body = request.body; 
 
-    } catch (e) {
-        console.error('Body parsing failed:', e);
-        return response.status(400).send('Invalid request body');
+    if (!body) {
+         return response.status(400).send('No request body provided by Vercel');
     }
+    // --------------------------------------------------------------------------
 
     // 🟢 ОБРАБОТКА ИНЛАЙН-КНОПОК (callback_query)
     if (body.callback_query) {
