@@ -114,7 +114,7 @@ export default async (request, response) => {
     const incomingText = message.text.trim();
     const userFirstName = message.from.first_name || 'друг';
 
-    // 🟢 КОНСТАНТА ДЛЯ ДИНАМИЧЕСКОГО ПРОГРЕССА
+    // КОНСТАНТА ДЛЯ ДИНАМИЧЕСКОГО ПРОГРЕССА
     const HABIT_GOAL_VOTES = 66; // 66 дней/голосов для закрепления привычки
     
     try {
@@ -205,9 +205,28 @@ export default async (request, response) => {
                 
                 // Обработка кнопок
                 if (incomingText.startsWith('/stats') || incomingText === '📊 Мой Прогресс') {
-                    confirmationMessage = `📊 *ТВОЯ СТАТИСТИКА* (В разработке)\n\n*Текущая Привычка:* ${habitName}\n*Идентичность:* ${identity}\n\n*Текущая серия:* 0 дней (Начните логгировать!)\n*Всего голосов за Идентичность:* ${userData.habit_votes_count || 0}\n\nДля полного отчета ожидайте ночной перерасчет.`;
+                    
+                    // 🟢 НОВЫЙ БЛОК: Запрос текущей серии (Streak)
+                    const { data: streakData, error: streakError } = await supabase
+                        .rpc('get_current_streak', { p_telegram_id: chatId });
+                    
+                    const currentStreak = (streakData && streakData.length > 0) ? streakData[0].get_current_streak : 0;
+                    
+                    if (streakError) {
+                         console.error('Streak RPC Error:', streakError);
+                         // Не критическая ошибка, просто выведем 0
+                    }
+                    
+                    // Расчет динамического прогресса
+                    const finalVoteCount = userData.habit_votes_count || 0;
+                    const dynamicProgress = Math.min(100, Math.round((finalVoteCount / HABIT_GOAL_VOTES) * 100));
+
+                    
+                    confirmationMessage = `📊 *ТВОЯ СТАТИСТИКА*\n\n*Текущая Привычка:* ${habitName}\n*Идентичность:* ${identity}\n\n*Квантумный Прогресс:* ${dynamicProgress}%\n*Всего голосов за Идентичность:* ${finalVoteCount}\n*Текущая серия (Streak):* ${currentStreak} ${currentStreak === 1 ? 'день' : 'дней'}\n\n_Продолжайте не прерывать цепочку!_`;
+                
                 } else if (incomingText.startsWith('/leaderboard') || incomingText === '🏆 Лидерборд') {
                     confirmationMessage = `🏆 *ЛИДЕРБОРД* (В разработке)\n\nЭта функция покажет ваш ранг среди других пользователей. \n\n_Помните: каждый голос за Идентичность продвигает вас вверх._`;
+                
                 } else if (incomingText.startsWith('/done') || incomingText.startsWith('/yes') || incomingText === '✅ Готово') {
                     
                     // НОВАЯ ЛОГИКА: Проверка, является ли привычка счетной
@@ -244,7 +263,7 @@ export default async (request, response) => {
                                            ? updatedUserRow[0].habit_votes_count 
                                            : (userData.habit_votes_count || 0) + 1; // Fallback на случай ошибки
                                            
-                    // 🟢 РАСЧЕТ ДИНАМИЧЕСКОГО ПРОГРЕССА (НЕСЧЕТНАЯ)
+                    // РАСЧЕТ ДИНАМИЧЕСКОГО ПРОГРЕССА (НЕСЧЕТНАЯ)
                     const dynamicProgress = Math.min(100, Math.round((finalVoteCount / HABIT_GOAL_VOTES) * 100));
                     
                     // 2. СОХРАНЕНИЕ ЛОГА ВЫПОЛНЕНИЯ (В habit_logs)
@@ -273,7 +292,7 @@ export default async (request, response) => {
                         const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                         
                         // УТВЕРЖДЕННЫЙ ТЕКСТ (Используем dynamicProgress)
-                        confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на ${dynamicProgress}% ближе к своей Цели 💪_`;
+                        confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на *${dynamicProgress}%* ближе к своей Цели 💪_`;
                     }
                     // Отправка сообщения с клавиатурой
                     await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
@@ -327,7 +346,7 @@ export default async (request, response) => {
                                                 ? updatedUserRow[0].habit_votes_count 
                                                 : (userData.habit_votes_count || 0) + 1; // Fallback
                                                 
-                        // 🟢 РАСЧЕТ ДИНАМИЧЕСКОГО ПРОГРЕССА (СЧЕТНАЯ)
+                        // РАСЧЕТ ДИНАМИЧЕСКОГО ПРОГРЕССА (СЧЕТНАЯ)
                         const dynamicProgress = Math.min(100, Math.round((finalVoteCount / HABIT_GOAL_VOTES) * 100));
 
                         // 3. Сохранение лога (с фактическим количеством)
@@ -355,7 +374,7 @@ export default async (request, response) => {
                             const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                             
                             // УТВЕРЖДЕННЫЙ ТЕКСТ (Используем dynamicProgress)
-                            confirmationMessage = `🎉 *${identityActionTerm} (x${countValue})!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}* **${countValue} раз**.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на ${dynamicProgress}% ближе к своей Цели 💪_`;
+                            confirmationMessage = `🎉 *${identityActionTerm} (x${countValue})!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}* **${countValue} раз**.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на *${dynamicProgress}%* ближе к своей Цели 💪_`;
                         }
                         
                         await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
