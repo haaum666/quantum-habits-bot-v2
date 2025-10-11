@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 // 1. КОНФИГУРАЦИЯ SUPABASE И TELEGRAM
 const SUPABASE_URL = process.env.BOT_SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOTK_TOKEN;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -21,14 +21,14 @@ const REMOVE_KEYBOARD = {
     remove_keyboard: true,
 };
 
-// 🟢 НОВАЯ КЛАВИАТУРА: ИНЛАЙН-КЛАВИАТУРА ДЛЯ ВЫБОРА ВРЕМЕНИ (Шаг 9)
+// 🟢 ИНЛАЙН-КЛАВИАТУРА ДЛЯ ВЫБОРА ВРЕМЕНИ (Шаг 9)
 const TIME_CHOICE_KEYBOARD = {
     inline_keyboard: [
         [{ text: 'Утро (08:00)', callback_data: 'time:08:00' }],
         [{ text: 'День (12:00)', callback_data: 'time:12:00' }],
         [{ text: 'Вечер (18:00)', callback_data: 'time:18:00' }],
         [{ text: 'Поздний вечер (21:00)', callback_data: 'time:21:00' }],
-        [{ text: 'Введу позже (Пропустить)', callback_data: 'time:skip' }], // Опция пропустить
+        [{ text: 'Введу позже (Пропустить)', callback_data: 'time:skip' }], 
     ],
 };
 
@@ -81,7 +81,7 @@ async function sendTelegramMessage(chatId, text, keyboard = null, parse_mode = '
     return response.json();
 }
 
-// 4.5. 🟢 НОВАЯ ФУНКЦИЯ: Редактирование сообщения (для инлайн-кнопок)
+// 4.5. ФУНКЦИЯ: Редактирование сообщения (для инлайн-кнопок)
 async function editTelegramMessage(chatId, messageId, text, keyboard = null, parse_mode = 'Markdown') {
     const payload = {
         chat_id: chatId,
@@ -280,11 +280,15 @@ export default async (request, response) => {
                 }
             }
             
-            // 1.5. Сброс состояния при команде /start
+            // 1.5. Сброс состояния и СЧЕТЧИКОВ при команде /start 🚀 ИСПРАВЛЕНИЕ: СБРОС СЧЕТЧИКОВ
             if (isStartCommand && userData && userData.onboarding_state !== 'STEP_1') {
                  const { error: resetError } = await supabase
                     .from('users')
-                    .update({ onboarding_state: 'STEP_1' })
+                    .update({ 
+                        onboarding_state: 'STEP_1', 
+                        habit_votes_count: 0, // 🔴 СБРОС СЧЕТЧИКА ГОЛОСОВ
+                        repetition_schedule: null // 🔴 СБРОС РАСПИСАНИЯ
+                    })
                     .eq('telegram_id', chatId);
 
                 if (resetError) {
