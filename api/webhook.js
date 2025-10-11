@@ -235,8 +235,9 @@ export default async (request, response) => {
                     // 1. АТОМНОЕ ОБНОВЛЕНИЕ счетчика голосов (Чистый инкремент)
                     const { data: updatedUserRow, error: voteError } = await supabase
                         .from('users')
+                        .update({ /* Пустой объект для инкремента */ }) // 🟢 ИСПРАВЛЕНО: .update() с пустым объектом
                         .eq('telegram_id', chatId)
-                        .increment('habit_votes_count', 1) // 🟢 ИСПРАВЛЕНО: АТОМНЫЙ ИНКРЕМЕНТ (без .update({}))
+                        .increment('habit_votes_count', 1) // 🟢 ИСПРАВЛЕНО: АТОМНЫЙ ИНКРЕМЕНТ
                         .select('habit_votes_count'); // Выбираем только счетчик для эффективности
                     
                     // Использование актуального счета, возвращенного из БД
@@ -305,21 +306,12 @@ export default async (request, response) => {
                         
                         // 2. АТОМНОЕ ОБНОВЛЕНИЕ: Возврат в статус COMPLETED и обновление счетчика голосов
                         
-                        // 2а. Сперва обновляем статус
-                        const { error: stateUpdateError } = await supabase
-                            .from('users')
-                            .update({ onboarding_state: 'COMPLETED' })
-                            .eq('telegram_id', chatId);
-                            
-                        if (stateUpdateError) {
-                            console.error('State Update Error (AWAITING_COUNT -> COMPLETED):', stateUpdateError);
-                        }
-
-                        // 2б. Затем атомарно увеличиваем счетчик и получаем актуальное значение
+                        // 2а. Обновляем статус и атомарно увеличиваем счетчик
                         const { data: updatedUserRow, error: updateError } = await supabase
                             .from('users')
+                            .update({ onboarding_state: 'COMPLETED' }) // 🟢 .update() с полезной нагрузкой
                             .eq('telegram_id', chatId)
-                            .increment('habit_votes_count', 1) // 🟢 ИСПРАВЛЕНО: АТОМНЫЙ ИНКРЕМЕНТ (отдельно от .update())
+                            .increment('habit_votes_count', 1) // 🟢 АТОМНЫЙ ИНКРЕМЕНТ
                             .select('habit_votes_count'); 
                             
                         // Использование актуального счета, возвращенного из БД
