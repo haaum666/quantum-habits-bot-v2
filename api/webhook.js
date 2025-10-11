@@ -21,6 +21,17 @@ const REMOVE_KEYBOARD = {
     remove_keyboard: true,
 };
 
+// 🟢 НОВАЯ КЛАВИАТУРА: ИНЛАЙН-КЛАВИАТУРА ДЛЯ ВЫБОРА ВРЕМЕНИ (Шаг 9)
+const TIME_CHOICE_KEYBOARD = {
+    inline_keyboard: [
+        [{ text: 'Утро (08:00)', callback_data: 'time:08:00' }],
+        [{ text: 'День (12:00)', callback_data: 'time:12:00' }],
+        [{ text: 'Вечер (18:00)', callback_data: 'time:18:00' }],
+        [{ text: 'Поздний вечер (21:00)', callback_data: 'time:21:00' }],
+        [{ text: 'Введу позже (Пропустить)', callback_data: 'time:skip' }], // Опция пропустить
+    ],
+};
+
 
 // 3. НОВАЯ ФУНКЦИЯ: ЗАДЕРЖКА (DELAY)
 function delay(ms) {
@@ -70,6 +81,31 @@ async function sendTelegramMessage(chatId, text, keyboard = null, parse_mode = '
     return response.json();
 }
 
+// 4.5. 🟢 НОВАЯ ФУНКЦИЯ: Редактирование сообщения (для инлайн-кнопок)
+async function editTelegramMessage(chatId, messageId, text, keyboard = null, parse_mode = 'Markdown') {
+    const payload = {
+        chat_id: chatId,
+        message_id: messageId,
+        text: text,
+        parse_mode: parse_mode,
+    };
+
+    if (keyboard) {
+        payload.reply_markup = keyboard;
+    }
+
+    const response = await fetch(`${TELEGRAM_API}/editMessageText`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        console.error(`Telegram API Edit Error: ${await response.text()}`);
+    }
+    return response.json();
+}
+
+
 // 5. ФУНКЦИЯ: СТАТУС ПЕЧАТАЕТ...
 async function sendChatAction(chatId, action = 'typing') {
     await fetch(`${TELEGRAM_API}/sendChatAction`, {
@@ -103,6 +139,95 @@ export default async (request, response) => {
         console.error('Body parsing failed:', e);
         return response.status(400).send('Invalid request body');
     }
+
+    // 🟢 ОБРАБОТКА ИНЛАЙН-КНОПОК (callback_query)
+    if (body.callback_query) {
+        const callbackQuery = body.callback_query;
+        const chatId = callbackQuery.message.chat.id;
+        const messageId = callbackQuery.message.message_id;
+        const data = callbackQuery.data;
+        const userTelegramId = callbackQuery.from.id;
+
+        // Отвечаем Telegram'у, чтобы убрать часы ожидания с кнопки
+        await fetch(`${TELEGRAM_API}/answerCallbackQuery`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ callback_query_id: callbackQuery.id }),
+        });
+
+        if (data.startsWith('time:')) {
+            const timeValue = data.substring(5); // Получаем '08:00' или 'skip'
+
+            // A. Получаем данные пользователя
+            const { data: userData, error: userError } = await supabase
+                .from('users')
+                .select('*')
+                .eq('telegram_id', userTelegramId)
+                .single();
+
+            if (userError && userError.code !== 'PGRST116') {
+                 console.error('Supabase Error (Callback SELECT):', userError);
+                 return response.status(500).send('Database Error');
+            }
+            if (!userData) {
+                 await sendTelegramMessage(chatId, 'Ошибка: Пользователь не найден. Напишите /start.', REMOVE_KEYBOARD);
+                 return response.status(200).send('User not found');
+            }
+
+
+            let repetitionSchedule = (timeValue === 'skip' || timeValue === 'null') ? null : timeValue;
+            
+            // B. Обновляем статус и расписание
+            const updatePayload = { 
+                repetition_schedule: repetitionSchedule, 
+                onboarding_state: 'COMPLETED' 
+            };
+
+            const { error: updateError } = await supabase
+                .from('users')
+                .update(updatePayload)
+                .eq('telegram_id', userTelegramId);
+
+            if (updateError) {
+                console.error(`Update Error (Callback Time Save):`, updateError);
+                await sendTelegramMessage(chatId, `Ошибка БД (UPDATE). Код: ${updateError.code}.`, 'HTML');
+                return response.status(500).send('Database Update Error');
+            }
+
+            // C. Финальное сообщение
+            const finalTimeDisplay = repetitionSchedule 
+                                    ? `*каждый день* в *${repetitionSchedule}*` 
+                                    : '*без фиксированного времени* (напоминания отключены)';
+            
+            const finalData = { ...userData, ...updatePayload }; // Актуальные данные
+
+            // Редактируем сообщение с кнопками
+            const confirmationMessage = `🎉 *ОНБОРДИНГ ЗАВЕРШЕН!* 🎉\n\n*Поздравляю!* Ты создал *Квантовую Привычку*. Я буду отправлять тебе напоминания ${finalTimeDisplay}.\n\n---
+*Твоя формула:*\n
+*Идентичность:* стать ${finalData.desired_identity || 'Не указана'}
+*Микро-Привычка:* ${finalData.habit_micro_step || 'Не указана'}
+*Триггер (Связка):* ${finalData.habit_link_action || 'Не указана'}
+*Награда (Дофамин):* ${finalData.habit_reward || 'Не указана'}
+*Идентификатор (название привычки):* ${finalData.habit_identifier || 'Не указан'}
+*План преодоления:* ${finalData.obstacle_plan_1 || 'Не указан'} 
+*План возврата:* ${finalData.failure_plan || 'Не указан'}
+---\n
+*Начни сейчас:* выполни *${finalData.habit_micro_step || 'Не указана'}* *сразу после* *${finalData.habit_link_action || 'Не указано'}*. \n\nПосле выполнения нажми *✅ Готово*!`;
+            
+            // 🟢 Редактируем исходное сообщение (удаляя кнопки)
+            await editTelegramMessage(chatId, messageId, confirmationMessage, { inline_keyboard: [] });
+            
+            // 🟢 Отправляем главную клавиатуру
+            await sendTelegramMessage(chatId, 'Твоя главная панель управления готова:', COMPLETED_KEYBOARD);
+
+            return response.status(200).send('Callback Processed');
+        }
+        
+        // Другие callback_query, если появятся
+        return response.status(200).send('Unknown Callback Processed');
+    }
+
+    // --- ОСНОВНАЯ ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ---
 
     const message = body.message;
 
@@ -206,7 +331,7 @@ export default async (request, response) => {
                 // Обработка кнопок
                 if (incomingText.startsWith('/stats') || incomingText === '📊 Мой Прогресс') {
                     
-                    // 🟢 НОВЫЙ БЛОК: Запрос текущей серии (Streak)
+                    // Запрос текущей серии (Streak)
                     const { data: streakData, error: streakError } = await supabase
                         .rpc('get_current_streak', { p_telegram_id: chatId });
                     
@@ -256,7 +381,7 @@ export default async (request, response) => {
                     
                     // 1. АТОМНОЕ ОБНОВЛЕНИЕ счетчика голосов (ИСПОЛЬЗУЕМ RPC)
                     const { data: updatedUserRow, error: voteError } = await supabase
-                        .rpc('increment_habit_votes', { user_id: chatId }); // ФИКС: RPC-вызов SQL-функции
+                        .rpc('increment_habit_votes', { user_id: chatId }); // RPC-вызов SQL-функции
                     
                     // Использование актуального счета, возвращенного из БД
                     const finalVoteCount = updatedUserRow && updatedUserRow.length > 0 
@@ -339,7 +464,7 @@ export default async (request, response) => {
 
                         // 2б. Затем атомарно увеличиваем счетчик и получаем актуальное значение (Используем RPC)
                         const { data: updatedUserRow, error: updateError } = await supabase
-                            .rpc('increment_habit_votes', { user_id: chatId }); // ФИКС: RPC-вызов SQL-функции
+                            .rpc('increment_habit_votes', { user_id: chatId }); // RPC-вызов SQL-функции
                             
                         // Использование актуального счета, возвращенного из БД
                         const finalVoteCount = updatedUserRow && updatedUserRow.length > 0 
@@ -436,55 +561,54 @@ export default async (request, response) => {
                         nextQuestion = `*ШАГ 8 из 9: Правило при пропуске* \n${generateSidebar(8)}\n\nЭто очень важное правило: *никогда не пропускай привычку дважды подряд*.\n\n*Напиши, как ты гарантированно вернешься к привычке после одного пропуска.* \n\n_Например: начну со второй половины дня, сделаю ее сразу же, как вспомню, независимо от времени._`;
                         break;
                     case 'STEP_8':
-                        updatePayload = { failure_plan: textToSave, onboarding_state: 'STEP_9' };
+                        // 🟢 ИЗМЕНЕНИЕ: НЕ ПЕРЕХОДИМ В STEP_9 ДЛЯ РУЧНОГО ВВОДА, А ОТПРАВЛЯЕМ КЛАВИАТУРУ
+                        updatePayload = { failure_plan: textToSave, onboarding_state: 'STEP_9' }; // Меняем статус на STEP_9, чтобы бот знал, что ждет нажатия кнопки
+
                         confirmationMessage = `✅ Принято! План возврата: *${textToSave}*.\n\nЭто защищает тебя от срыва. _Один пропуск - случайность. Два - начало плохой привычки._`;
                         
                         // ИНТЕГРАЦИЯ САЙДБАРА (ШАГ 9)
-                        nextQuestion = `*ШАГ 9 из 9: Установка Дедлайнов* \n${generateSidebar(9)}\n\nЧтобы я мог отправлять тебе напоминания и собирать статистику, нужно установить регулярные дедлайны.\n\n*Напиши точное время, когда ты планируешь выполнять привычку.* \n\n_Например: 18:30 или 08:00._`;
-                        break;
-                    case 'STEP_9':
-                        // ФИНАЛЬНЫЙ ШАГ
-                        updatePayload = { repetition_schedule: textToSave, onboarding_state: 'COMPLETED' };
+                        nextQuestion = `*ШАГ 9 из 9: Установка Дедлайнов* \n${generateSidebar(9)}\n\nЧтобы я мог отправлять тебе напоминания и собирать статистику, нужно установить регулярные дедлайны.\n\n*Пожалуйста, выбери время, когда ты планируешь выполнять привычку.*`;
                         
-                        const { error: updateErrorStep9 } = await supabase
+                        // Сперва обновляем статус
+                        const { error: updateErrorStep8 } = await supabase
                             .from('users')
                             .update(updatePayload)
                             .eq('telegram_id', chatId);
 
-                        if (updateErrorStep9) {
-                            console.error(`Update Error (STEP_9):`, updateErrorStep9);
-                            await sendTelegramMessage(chatId, `Ошибка БД (UPDATE). Код: ${updateErrorStep9.code}.`, 'HTML');
+                        if (updateErrorStep8) {
+                            console.error(`Update Error (STEP_8):`, updateErrorStep8);
+                            await sendTelegramMessage(chatId, `Ошибка БД (UPDATE). Код: ${updateErrorStep8.code}.`, 'HTML');
                             return response.status(500).send('Database Update Error');
                         }
                         
-                        // ВАЖНО: Получаем актуальные данные для финальной сводки
-                        const finalData = { ...userData, ...updatePayload };
+                        // Отправляем сообщение подтверждения
+                        await sendChatAction(chatId, 'typing');
+                        await delay(1000); 
+                        await sendTelegramMessage(chatId, confirmationMessage);
 
-                        // 3. Составляем финальное сообщение
-                        confirmationMessage = `🎉 *ОНБОРДИНГ ЗАВЕРШЕН!* 🎉\n\n*Поздравляю!* Ты создал *Квантовую Привычку*. Я буду отправлять тебе напоминания *каждый день* в *${textToSave}*.\n\n---
-*Твоя формула:*\n
-*Идентичность:* стать ${finalData.desired_identity || 'Не указана'}
-*Микро-Привычка:* ${finalData.habit_micro_step || 'Не указана'}
-*Триггер (Связка):* ${finalData.habit_link_action || 'Не указана'}
-*Награда (Дофамин):* ${finalData.habit_reward || 'Не указана'}
-*Идентификатор (название привычки):* ${finalData.habit_identifier || 'Не указан'}
-*План преодоления:* ${finalData.obstacle_plan_1 || 'Не указан'} 
-*План возврата:* ${finalData.failure_plan || 'Не указан'}
----\n
-*Начни сейчас:* выполни *${finalData.habit_micro_step || 'Не указана'}* *сразу после* *${finalData.habit_link_action || 'Не указано'}*. \n\nПосле выполнения нажми *✅ Готово*!`;
-                        nextQuestion = null;
+                        // Отправляем финальный вопрос с ИНЛАЙН-КЛАВИАТУРОЙ (ТАК КАК ЭТО STEP_9)
+                        await sendChatAction(chatId, 'typing');
+                        await delay(1000); 
+                        // 🟢 НОВАЯ ЛОГИКА: Вместо отправки текста, отправляем инлайн-клавиатуру
+                        await sendTelegramMessage(chatId, nextQuestion, TIME_CHOICE_KEYBOARD); 
                         
-                        await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
-                        return response.status(200).send('Processed');
+                        return response.status(200).send('Processed to Step 9 (Time Selection)');
 
+                    case 'STEP_9':
+                        // Пользователь здесь может ввести ЛЮБОЙ текст, пока не нажмет кнопку. 
+                        // Мы просто игнорируем его и просим нажать на кнопку.
+                        confirmationMessage = `Пожалуйста, *выбери время из предложенных кнопок* или нажми 'Введу позже' для завершения онбординга.`;
+                        await sendTelegramMessage(chatId, confirmationMessage, TIME_CHOICE_KEYBOARD);
+                        return response.status(200).send('Waiting for time button click');
+                        
                     default:
                         confirmationMessage = `Ошибка! Неизвестный статус онбординга: *${currentStep}*.\n\n*Напиши /start, чтобы начать заново.*`;
                         nextQuestion = null;
                 }
             }
             
-            // Если мы не в состоянии 'COMPLETED', 'AWAITING_COUNT' и не в 'STEP_9', пытаемся обновить БД
-            if (currentStep !== 'STEP_9' && currentStep !== 'COMPLETED' && currentStep !== 'AWAITING_COUNT') {
+            // Если мы не в состоянии 'COMPLETED', 'AWAITING_COUNT', 'STEP_9' и не в 'STEP_8'
+            if (currentStep !== 'STEP_9' && currentStep !== 'COMPLETED' && currentStep !== 'AWAITING_COUNT' && currentStep !== 'STEP_8') {
                 
                 const { error: updateError } = await supabase
                     .from('users')
@@ -499,7 +623,7 @@ export default async (request, response) => {
             }
             
             // Отправка сообщений в онбординге (с использованием TYPING и DELAY)
-            if (currentStep !== 'STEP_9') {
+            if (currentStep !== 'STEP_8') {
                 await sendChatAction(chatId, 'typing');
                 await delay(1000); 
                 await sendTelegramMessage(chatId, confirmationMessage);
