@@ -196,7 +196,7 @@ export default async (request, response) => {
             let nextQuestion = '';
 
             // НОВАЯ ЛОГИКА ДЛЯ РАБОЧЕГО РЕЖИМА (COMPLETED)
-            if (currentStep === 'COMPLETED') {
+            if (currentStep === 'COMPLETED' || currentStep === 'AWAITING_COUNT') {
                 const habitName = userData.habit_micro_step || 'Не указана';
                 const identity = userData.desired_identity || 'Не указана';
                 
@@ -207,9 +207,31 @@ export default async (request, response) => {
                     confirmationMessage = `🏆 *ЛИДЕРБОРД* (В разработке)\n\nЭта функция покажет ваш ранг среди других пользователей. \n\n_Помните: каждый голос за Идентичность продвигает вас вверх._`;
                 } else if (incomingText.startsWith('/done') || incomingText.startsWith('/yes') || incomingText === '✅ Готово') {
                     
-                    const newVoteCount = (userData.habit_votes_count || 0) + 1;
+                    // НОВАЯ ЛОГИКА: Проверка, является ли привычка счетной
+                    if (userData.is_countable === true) {
+                        // 1. Установка нового временного состояния
+                        const { error: stateError } = await supabase
+                            .from('users')
+                            .update({ onboarding_state: 'AWAITING_COUNT' })
+                            .eq('telegram_id', chatId)
+                            .select('*'); 
+                            
+                        if (stateError && stateError.code !== 'PGRST204') {
+                             console.error('State Update Error (AWAITING_COUNT):', stateError);
+                             confirmationMessage = `Критическая ошибка БД при смене статуса: ${stateError?.code}.`;
+                             await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
+                             return response.status(500).send('Database Error');
+                        }
+                        
+                        // 2. Запрос количества
+                        confirmationMessage = `🔢 Отлично! Твоя привычка *${habitName}* является счетной.\n\n*Пожалуйста, введи только число*, которое ты только что выполнил.`;
+                        await sendTelegramMessage(chatId, confirmationMessage, REMOVE_KEYBOARD); // Убираем клавиатуру для ввода числа
+                        
+                        return response.status(200).send('Awaiting count input');
+                    }
                     
-                    // --- ОБНОВЛЕННАЯ ЛОГИКА: КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ И ЛОГГИРОВАНИЕ ---
+                    // СТАНДАРТНАЯ (НЕСЧЕТНАЯ) ЛОГИКА - Если is_countable не True
+                    const newVoteCount = (userData.habit_votes_count || 0) + 1;
                     
                     // 1. Обновление счетчика голосов (используем select('*') для избежания PGRST204)
                     const { error: voteError } = await supabase
@@ -226,12 +248,12 @@ export default async (request, response) => {
                                  telegram_id: chatId,
                                  habit_identifier: userData.habit_identifier || 'unknown',
                                  completed_at: new Date().toISOString(),
+                                 actual_count: 1, // Для несчетных ставим 1 по умолчанию
                              }
                          ]);
 
 
                     // ИСПРАВЛЕННАЯ ЛОГИКА ПРОВЕРКИ ОШИБОК: 
-                    // PGRST204 при INSERT/UPDATE - это успех без контента, который библиотека видит как ошибку.
                     const isCritcalError = 
                         (voteError && voteError.code !== 'PGRST204') || 
                         (logError && logError.code !== 'PGRST204');
@@ -243,24 +265,80 @@ export default async (request, response) => {
                     } else {
                         const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                         
-                        // --- ОКОНЧАТЕЛЬНО УТВЕРЖДЕННЫЙ ТЕКСТ ---
+                        // УТВЕРЖДЕННЫЙ ТЕКСТ
                         confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${newVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
                     }
-                    // --------------------------------------------------------
+                    // Отправка сообщения с клавиатурой
+                    await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
+                    return response.status(200).send('Processed');
+                
                 } else {
                     confirmationMessage = `Ты уже завершил онбординг! Твоя привычка: ${habitName}. \n\n_Используй кнопки ниже для логгирования или отчета._`;
+                    // Отправка сообщения с клавиатурой
+                    await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
+                    return response.status(200).send('Processed');
                 }
 
-                nextQuestion = null;
-                
-                // Отправка сообщения с клавиатурой
-                await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
-                return response.status(200).send('Processed');
 
             } else {
                 
                 // --- ЛОГИКА ОНБОРДИНГА (STEP_1 - STEP_9) ---
                 switch (currentStep) {
+                    
+                    // --- НОВЫЙ БЛОК: ОЖИДАНИЕ ВВОДА КОЛИЧЕСТВА ---
+                    case 'AWAITING_COUNT':
+                        const habitName = userData.habit_micro_step || 'Не указана';
+                        const identity = userData.desired_identity || 'Не указана';
+                        
+                        // 1. Проверяем, что введено число
+                        const countValue = parseInt(incomingText);
+                        
+                        if (isNaN(countValue) || countValue <= 0) {
+                            await sendTelegramMessage(chatId, `❌ Ошибка: Пожалуйста, введи *корректное число* (больше нуля).`, REMOVE_KEYBOARD);
+                            // Не меняем статус, чтобы повторно запросить ввод
+                            return response.status(200).send('Invalid count input');
+                        }
+                        
+                        // 2. Возврат в статус COMPLETED и обновление счетчика голосов
+                        const newVoteCount = (userData.habit_votes_count || 0) + 1;
+
+                        const { error: updateError } = await supabase
+                            .from('users')
+                            .update({ onboarding_state: 'COMPLETED', habit_votes_count: newVoteCount })
+                            .eq('telegram_id', chatId)
+                            .select('*'); 
+                            
+                        // 3. Сохранение лога (с фактическим количеством)
+                        const { error: logErrorCount } = await supabase
+                            .from('habit_logs')
+                            .insert([
+                                {
+                                    telegram_id: chatId,
+                                    habit_identifier: userData.habit_identifier || 'unknown',
+                                    completed_at: new Date().toISOString(),
+                                    actual_count: countValue, // Сохраняем введенное количество
+                                }
+                            ]);
+
+
+                        const isCritcalErrorCount = 
+                            (updateError && updateError.code !== 'PGRST204') || 
+                            (logErrorCount && logErrorCount.code !== 'PGRST204');
+                        
+                        // 4. Отправка подтверждения
+                        if (isCritcalErrorCount) {
+                            console.error('Logging Error (Counted):', updateError || logErrorCount);
+                            confirmationMessage = `Критическая ошибка при логгировании: ${updateError?.code || logErrorCount?.code}.`;
+                        } else {
+                            const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
+                            
+                            confirmationMessage = `🎉 *${identityActionTerm} (x${countValue})!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}* **${countValue} раз**.\n\nЭто *${newVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
+                        }
+                        
+                        await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
+                        return response.status(200).send('Processed counted habit');
+                    // --- КОНЕЦ НОВОГО БЛОКА AWAITING_COUNT ---
+                    
                     case 'STEP_1':
                         updatePayload = { desired_identity: textToSave, onboarding_state: 'STEP_2' };
                         confirmationMessage = `✅ Принято! Твоя цель — *стать ${textToSave}*.\n\nТеперь каждое твое действие будет *движением* к этой цели. Давай *выберем инструмент* для следующего шага.`;
@@ -363,8 +441,8 @@ export default async (request, response) => {
                 }
             }
             
-            // Если мы не в состоянии 'COMPLETED' и не в 'STEP_9', пытаемся обновить БД
-            if (currentStep !== 'STEP_9' && currentStep !== 'COMPLETED') {
+            // Если мы не в состоянии 'COMPLETED', 'AWAITING_COUNT' и не в 'STEP_9', пытаемся обновить БД
+            if (currentStep !== 'STEP_9' && currentStep !== 'COMPLETED' && currentStep !== 'AWAITING_COUNT') {
                 
                 const { error: updateError } = await supabase
                     .from('users')
