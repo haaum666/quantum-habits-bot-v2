@@ -114,6 +114,9 @@ export default async (request, response) => {
     const incomingText = message.text.trim();
     const userFirstName = message.from.first_name || 'друг';
 
+    // 🟢 КОНСТАНТА ДЛЯ ДИНАМИЧЕСКОГО ПРОГРЕССА
+    const HABIT_GOAL_VOTES = 66; // 66 дней/голосов для закрепления привычки
+    
     try {
         // A. Проверка существования пользователя в базе.
         const { data: userData, error: userError } = await supabase
@@ -234,12 +237,15 @@ export default async (request, response) => {
                     
                     // 1. АТОМНОЕ ОБНОВЛЕНИЕ счетчика голосов (ИСПОЛЬЗУЕМ RPC)
                     const { data: updatedUserRow, error: voteError } = await supabase
-                        .rpc('increment_habit_votes', { user_id: chatId }); // 🟢 ФИКС: RPC-вызов SQL-функции
+                        .rpc('increment_habit_votes', { user_id: chatId }); // ФИКС: RPC-вызов SQL-функции
                     
                     // Использование актуального счета, возвращенного из БД
                     const finalVoteCount = updatedUserRow && updatedUserRow.length > 0 
                                            ? updatedUserRow[0].habit_votes_count 
                                            : (userData.habit_votes_count || 0) + 1; // Fallback на случай ошибки
+                                           
+                    // 🟢 РАСЧЕТ ДИНАМИЧЕСКОГО ПРОГРЕССА (НЕСЧЕТНАЯ)
+                    const dynamicProgress = Math.min(100, Math.round((finalVoteCount / HABIT_GOAL_VOTES) * 100));
                     
                     // 2. СОХРАНЕНИЕ ЛОГА ВЫПОЛНЕНИЯ (В habit_logs)
                     const { error: logError } = await supabase
@@ -266,8 +272,8 @@ export default async (request, response) => {
                     } else {
                         const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                         
-                        // УТВЕРЖДЕННЫЙ ТЕКСТ (Используем finalVoteCount)
-                        confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
+                        // УТВЕРЖДЕННЫЙ ТЕКСТ (Используем dynamicProgress)
+                        confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на *${dynamicProgress}%* ближе к своей Цели 💪_`;
                     }
                     // Отправка сообщения с клавиатурой
                     await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
@@ -314,13 +320,16 @@ export default async (request, response) => {
 
                         // 2б. Затем атомарно увеличиваем счетчик и получаем актуальное значение (Используем RPC)
                         const { data: updatedUserRow, error: updateError } = await supabase
-                            .rpc('increment_habit_votes', { user_id: chatId }); // 🟢 ФИКС: RPC-вызов SQL-функции
+                            .rpc('increment_habit_votes', { user_id: chatId }); // ФИКС: RPC-вызов SQL-функции
                             
                         // Использование актуального счета, возвращенного из БД
                         const finalVoteCount = updatedUserRow && updatedUserRow.length > 0 
                                                 ? updatedUserRow[0].habit_votes_count 
                                                 : (userData.habit_votes_count || 0) + 1; // Fallback
-                            
+                                                
+                        // 🟢 РАСЧЕТ ДИНАМИЧЕСКОГО ПРОГРЕССА (СЧЕТНАЯ)
+                        const dynamicProgress = Math.min(100, Math.round((finalVoteCount / HABIT_GOAL_VOTES) * 100));
+
                         // 3. Сохранение лога (с фактическим количеством)
                         const { error: logErrorCount } = await supabase
                             .from('habit_logs')
@@ -345,7 +354,8 @@ export default async (request, response) => {
                         } else {
                             const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                             
-                            confirmationMessage = `🎉 *${identityActionTerm} (x${countValue})!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}* **${countValue} раз**.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
+                            // УТВЕРЖДЕННЫЙ ТЕКСТ (Используем dynamicProgress)
+                            confirmationMessage = `🎉 *${identityActionTerm} (x${countValue})!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}* **${countValue} раз**.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на *${dynamicProgress}%* ближе к своей Цели 💪_`;
                         }
                         
                         await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
