@@ -232,20 +232,18 @@ export default async (request, response) => {
                     
                     // СТАНДАРТНАЯ (НЕСЧЕТНАЯ) ЛОГИКА - Если is_countable не True
                     
-                    // Расчет нового счетчика
-                    const calculatedNewVoteCount = (userData.habit_votes_count || 0) + 1;
-                    
-                    // 1. Обновление счетчика голосов (используем select('*') для получения актуального счета)
+                    // 1. АТОМНОЕ ОБНОВЛЕНИЕ счетчика голосов (ИСПОЛЬЗУЕМ .increment())
                     const { data: updatedUserRow, error: voteError } = await supabase
                         .from('users')
-                        .update({ habit_votes_count: calculatedNewVoteCount })
+                        .update({}) // Пустой объект, т.к. инкремент делает работу
                         .eq('telegram_id', chatId)
-                        .select('*'); 
+                        .increment('habit_votes_count', 1) // 🟢 ФИКС: АТОМНЫЙ ИНКРЕМЕНТ
+                        .select('habit_votes_count'); // Выбираем только счетчик для эффективности
                     
                     // Использование актуального счета, возвращенного из БД
                     const finalVoteCount = updatedUserRow && updatedUserRow.length > 0 
                                            ? updatedUserRow[0].habit_votes_count 
-                                           : calculatedNewVoteCount; // Fallback
+                                           : (userData.habit_votes_count || 0) + 1; // Fallback на случай ошибки
                     
                     // 2. СОХРАНЕНИЕ ЛОГА ВЫПОЛНЕНИЯ (В habit_logs)
                     const { error: logError } = await supabase
@@ -306,19 +304,19 @@ export default async (request, response) => {
                             return response.status(200).send('Invalid count input');
                         }
                         
-                        // 2. Возврат в статус COMPLETED и обновление счетчика голосов
-                        const calculatedNewVoteCount = (userData.habit_votes_count || 0) + 1;
-
+                        // 2. АТОМНОЕ ОБНОВЛЕНИЕ: Возврат в статус COMPLETED и обновление счетчика голосов
+                        // ИСПОЛЬЗУЕМ .increment()
                         const { data: updatedUserRow, error: updateError } = await supabase
                             .from('users')
-                            .update({ onboarding_state: 'COMPLETED', habit_votes_count: calculatedNewVoteCount })
+                            .update({ onboarding_state: 'COMPLETED' })
                             .eq('telegram_id', chatId)
-                            .select('*'); 
+                            .increment('habit_votes_count', 1) // 🟢 ФИКС: АТОМНЫЙ ИНКРЕМЕНТ
+                            .select('habit_votes_count'); 
                             
                         // Использование актуального счета, возвращенного из БД
                         const finalVoteCount = updatedUserRow && updatedUserRow.length > 0 
                                                 ? updatedUserRow[0].habit_votes_count 
-                                                : calculatedNewVoteCount;
+                                                : (userData.habit_votes_count || 0) + 1; // Fallback
                             
                         // 3. Сохранение лога (с фактическим количеством)
                         const { error: logErrorCount } = await supabase
