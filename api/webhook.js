@@ -231,14 +231,21 @@ export default async (request, response) => {
                     }
                     
                     // СТАНДАРТНАЯ (НЕСЧЕТНАЯ) ЛОГИКА - Если is_countable не True
-                    const newVoteCount = (userData.habit_votes_count || 0) + 1;
                     
-                    // 1. Обновление счетчика голосов (используем select('*') для избежания PGRST204)
-                    const { error: voteError } = await supabase
+                    // Расчет нового счетчика
+                    const calculatedNewVoteCount = (userData.habit_votes_count || 0) + 1;
+                    
+                    // 1. Обновление счетчика голосов (используем select('*') для получения актуального счета)
+                    const { data: updatedUserRow, error: voteError } = await supabase
                         .from('users')
-                        .update({ habit_votes_count: newVoteCount })
+                        .update({ habit_votes_count: calculatedNewVoteCount })
                         .eq('telegram_id', chatId)
                         .select('*'); 
+                    
+                    // Использование актуального счета, возвращенного из БД
+                    const finalVoteCount = updatedUserRow && updatedUserRow.length > 0 
+                                           ? updatedUserRow[0].habit_votes_count 
+                                           : calculatedNewVoteCount; // Fallback
                     
                     // 2. СОХРАНЕНИЕ ЛОГА ВЫПОЛНЕНИЯ (В habit_logs)
                     const { error: logError } = await supabase
@@ -265,8 +272,8 @@ export default async (request, response) => {
                     } else {
                         const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                         
-                        // УТВЕРЖДЕННЫЙ ТЕКСТ
-                        confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${newVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
+                        // УТВЕРЖДЕННЫЙ ТЕКСТ (Используем finalVoteCount)
+                        confirmationMessage = `🎉 *${identityActionTerm}!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}*.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
                     }
                     // Отправка сообщения с клавиатурой
                     await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
@@ -300,13 +307,18 @@ export default async (request, response) => {
                         }
                         
                         // 2. Возврат в статус COMPLETED и обновление счетчика голосов
-                        const newVoteCount = (userData.habit_votes_count || 0) + 1;
+                        const calculatedNewVoteCount = (userData.habit_votes_count || 0) + 1;
 
-                        const { error: updateError } = await supabase
+                        const { data: updatedUserRow, error: updateError } = await supabase
                             .from('users')
-                            .update({ onboarding_state: 'COMPLETED', habit_votes_count: newVoteCount })
+                            .update({ onboarding_state: 'COMPLETED', habit_votes_count: calculatedNewVoteCount })
                             .eq('telegram_id', chatId)
                             .select('*'); 
+                            
+                        // Использование актуального счета, возвращенного из БД
+                        const finalVoteCount = updatedUserRow && updatedUserRow.length > 0 
+                                                ? updatedUserRow[0].habit_votes_count 
+                                                : calculatedNewVoteCount;
                             
                         // 3. Сохранение лога (с фактическим количеством)
                         const { error: logErrorCount } = await supabase
@@ -332,7 +344,7 @@ export default async (request, response) => {
                         } else {
                             const identityActionTerm = 'КВАНТУМНОЕ ПОДТВЕРЖДЕНИЕ'; 
                             
-                            confirmationMessage = `🎉 *${identityActionTerm} (x${countValue})!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}* **${countValue} раз**.\n\nЭто *${newVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
+                            confirmationMessage = `🎉 *${identityActionTerm} (x${countValue})!* 🎉\n\nТы только что совершил *Квантумное подтверждение*, выполнив: *${habitName}* **${countValue} раз**.\n\nЭто *${finalVoteCount}-й голос* за твою **Усовершенствованную Личность**: *стать ${identity}*.\n\n_Поздравляю! Ты на 1% ближе к своей Цели 💪_`;
                         }
                         
                         await sendTelegramMessage(chatId, confirmationMessage, COMPLETED_KEYBOARD);
